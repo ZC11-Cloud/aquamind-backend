@@ -9,3 +9,14 @@ GET http://127.0.0.1:8000/hello/User
 Accept: application/json
 
 ###
+
+POST 127.0.0.1:8000/user/register
+Content-Type: application/json
+
+{
+    "username": "testuser",
+    "password": "testpassword",
+    "email": "test@example.com",
+    "phone": "12345678901",
+    "real_name": "Test User"
+}
