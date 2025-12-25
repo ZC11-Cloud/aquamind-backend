@@ -2,8 +2,8 @@ from sqlalchemy import select, exists
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.user import User
-from schemas.user import UserRegister
-from utils.security import hash_password
+from schemas.user import UserRegister, UserLogin
+from utils.security import hash_password, verify_password
 
 
 class UserService:
@@ -29,4 +29,20 @@ class UserService:
             self.session.add(user)
             return True
 
+    async def login_user(self, login_data: UserLogin) -> User | None:
+        async with self.session.begin():
+            # 1. 查询用户
+            user = await self.session.scalar(select(User).where(User.username == login_data.username))
+            if not user:
+                return None
+            # 2. 验证密码
+            if not verify_password(login_data.password, user.password):
+                return None
+            return user
+
+    async def get_user_by_username(self, username: str) -> User | None:
+        async with self.session.begin():
+            # 1. 查询用户
+            user = await self.session.scalar(select(User).where(User.username == username))
+            return user
 
