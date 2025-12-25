@@ -36,3 +36,9 @@ class UserInfo(BaseModel):
     email: EmailStr | None = None
     role: int
     status: int
+
+class UserPasswordChange(BaseModel):
+    """用户密码修改模型"""
+    username: UsernameStr
+    password: PasswordStr
+    new_password: PasswordStr

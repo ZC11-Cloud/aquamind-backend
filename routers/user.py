@@ -1,3 +1,4 @@
+import logging
 from datetime import timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -8,14 +9,14 @@ from dependencies import get_session, get_current_user
 from models import user
 from models.user import User
 from schemas.response import ResponseSchema
-from schemas.user import UserRegister, UserLogin, Token, UserInfo
+from schemas.user import UserRegister, UserLogin, Token, UserInfo, UserPasswordChange
 from service.user_service import UserService
 from settings import ACCESS_TOKEN_EXPIRE_MINUTES
 from utils.security import create_access_token
 
-router = APIRouter(prefix="/user")
-
-@router.post("/register")
+router = APIRouter(prefix="/user", tags=["user"])
+logger = logging.getLogger(__name__)
+@router.post("/register", response_model=ResponseSchema)
 async def register(user: UserRegister, session: AsyncSession = Depends(get_session)):
     """用户注册"""
     # 1. 用户名密码不能为空
@@ -26,7 +27,7 @@ async def register(user: UserRegister, session: AsyncSession = Depends(get_sessi
     registered = await user_service.register_user(user)
     if not registered:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Username already exists")
-    return ResponseSchema(message="Register success")
+    return ResponseSchema(result="success", code=200, message="Register success")
 
 
 @router.post("/login", response_model=Token)
@@ -55,4 +56,20 @@ async def read_users_me(current_user: UserInfo = Depends(get_current_user)):
     """获取当前登录用户信息"""
     return current_user
 
+
+@router.post("/password", response_model=ResponseSchema)
+async def change_password(user: UserPasswordChange, current_user: UserInfo = Depends(get_current_user), session: AsyncSession = Depends(get_session)):
+    """修改用户密码"""
+    # 1. 用户名密码不能为空
+    if not user.username or not user.password or not user.new_password:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Username, password, and new password cannot be empty")
+    # 2. 验证用户名
+    if user.username != current_user.username:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Incorrect username")
+    # 3. 修改密码
+    user_service = UserService(session)
+    changed = await user_service.change_password(user)
+    if not changed:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Incorrect username or password")
+    return ResponseSchema(result="success", code=200, message="Password changed success")
 

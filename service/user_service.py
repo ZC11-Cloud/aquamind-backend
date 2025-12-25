@@ -2,7 +2,7 @@ from sqlalchemy import select, exists
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.user import User
-from schemas.user import UserRegister, UserLogin
+from schemas.user import UserRegister, UserLogin, UserPasswordChange
 from utils.security import hash_password, verify_password
 
 
@@ -46,3 +46,18 @@ class UserService:
             user = await self.session.scalar(select(User).where(User.username == username))
             return user
 
+
+    async def change_password(self, user_data: UserPasswordChange) -> bool:
+        async with self.session.begin():
+            # 1. 查询用户
+            user = await self.session.scalar(select(User).where(User.username == user_data.username))
+            if not user:
+                return False
+            # 2. 验证密码
+            if not verify_password(user_data.password, user.password):
+                return False
+            # 3. 加密新密码
+            hashed_password = hash_password(user_data.new_password)
+            # 4. 更新密码
+            user.password = hashed_password
+            return True
