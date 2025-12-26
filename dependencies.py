@@ -3,7 +3,7 @@ from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models import AsyncSessionFactory
-from models.user import User, UserStatus
+from models.user import User, DISABLED_STATUS
 from service.user_service import UserService
 from utils.security import decode_access_token
 
@@ -39,7 +39,7 @@ async def get_current_user(token: str = Depends(oauth2_scheme), session: AsyncSe
         raise credentials_exception
     
     # 检查用户状态
-    if user.status == UserStatus.DISABLED:
+    if user.status == DISABLED_STATUS:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="User account is disabled",

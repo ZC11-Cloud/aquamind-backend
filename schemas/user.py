@@ -2,8 +2,6 @@ from typing import Annotated
 
 from pydantic import BaseModel, Field, EmailStr
 
-from models.user import UserStatus, UserRole
-
 UsernameStr = Annotated[str, Field(..., min_length=3, max_length=50)]
 PasswordStr = Annotated[str, Field(..., min_length=6, max_length=100)]
 PhoneStr = Annotated[str | None, Field(None, pattern=r'^1[3-9]\d{9}$')]
@@ -35,8 +33,8 @@ class UserInfo(BaseModel):
     real_name: str | None = None
     phone: PhoneStr
     email: EmailStr | None = None
-    role: UserRole
-    status: UserStatus
+    role: int
+    status: int
 
     class Config:
         from_attributes = True

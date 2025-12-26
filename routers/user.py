@@ -96,3 +96,39 @@ async def update_user(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
     return ResponseSchema(result="success", code=200, message="User updated success")
 
+
+@router.get("/{user_id}", response_model=ResponseSchema)
+async def get_user_info(
+        user_id: int,
+        current_user: User = Depends(get_current_user),
+        session: AsyncSession = Depends(get_session)
+):
+    """获取指定用户详细信息（管理员权限）"""
+    # 1. 权限检查： 只有管理员可以查询其他用户信息
+    if current_user.role != 1:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to view this user")
+    # 2. 查询用户
+    user_service = UserService(session)
+    user = await user_service.get_user_by_id(user_id)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    user_info = UserInfo.model_validate(user)
+    return ResponseSchema(result="success", code=200, message="User info retrieved success", data=user_info.model_dump())
+
+
+@router.post("", response_model=ResponseSchema)
+async def add_user(
+        user: UserRegister,
+        current_user: User = Depends(get_current_user),
+        session: AsyncSession = Depends(get_session)
+):
+    """添加新用户（管理员权限）"""
+    # 1. 权限检查： 只有管理员可以添加用户
+    if current_user.role != 1:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to add user")
+    # 2. 添加用户
+    user_service = UserService(session)
+    added = await user_service.register_user(user)
+    if not added:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Username already exists")
+    return ResponseSchema(result="success", code=200, message="User added success")

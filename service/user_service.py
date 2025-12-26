@@ -86,3 +86,9 @@ class UserService:
                 update_fields["status"] = user_data.status
 
             return True
+
+    async def get_user_by_id(self, user_id: int) -> User | None:
+        async with self.session.begin():
+            # 1. 查询用户
+            user = await self.session.scalar(select(User).where(User.id == user_id))
+            return user
