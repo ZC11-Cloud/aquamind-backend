@@ -73,3 +73,26 @@ async def change_password(user: UserPasswordChange, current_user: UserInfo = Dep
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Incorrect username or password")
     return ResponseSchema(result="success", code=200, message="Password changed success")
 
+@router.put("/me", response_model=ResponseSchema)
+async def update_user(
+        user_update: UserInfo,
+        current_user: User = Depends(get_current_user),
+        session: AsyncSession = Depends(get_session)
+):
+    """更新当前登录用户信息"""
+    # 1. 权限检查： 普通用户只能更新自己，管理员可以更新所有人
+    if current_user.role != 1 and user_update.id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to update this user")
+
+    # 2. 普通用户不能修改自己的角色和状态
+    if current_user.role != 1:
+        user_update.role = current_user.role
+        user_update.status = current_user.status
+
+    # 3.更新用户信息
+    user_service = UserService(session)
+    updated = await user_service.update_user(user_update)
+    if not updated:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    return ResponseSchema(result="success", code=200, message="User updated success")
+

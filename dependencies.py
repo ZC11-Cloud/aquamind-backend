@@ -1,10 +1,9 @@
-
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models import AsyncSessionFactory
-from models.user import User
+from models.user import User, UserStatus
 from service.user_service import UserService
 from utils.security import decode_access_token
 
@@ -38,6 +37,12 @@ async def get_current_user(token: str = Depends(oauth2_scheme), session: AsyncSe
     user = await user_service.get_user_by_username(username)
     if user is None:
         raise credentials_exception
+    
+    # 检查用户状态
+    if user.status == UserStatus.DISABLED:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User account is disabled",
+        )
 
     return user
-

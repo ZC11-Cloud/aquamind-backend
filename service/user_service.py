@@ -2,9 +2,8 @@ from sqlalchemy import select, exists
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.user import User
-from schemas.user import UserRegister, UserLogin, UserPasswordChange
+from schemas.user import UserRegister, UserLogin, UserPasswordChange, UserInfo
 from utils.security import hash_password, verify_password
-
 
 class UserService:
     def __init__(self, session: AsyncSession):
@@ -60,4 +59,30 @@ class UserService:
             hashed_password = hash_password(user_data.new_password)
             # 4. 更新密码
             user.password = hashed_password
+            return True
+
+    async def update_user(self, user_data: UserInfo) -> bool:
+        async with self.session.begin():
+            # 1. 查询用户
+            user: User = await self.session.scalar(select(User).where(User.id == user_data.id))
+            if not user:
+                return False
+            # 2. 更新用户信息
+            update_fields = {}
+            if user_data.real_name is not None:
+                user.real_name = user_data.real_name
+                update_fields["real_name"] = user_data.real_name
+            if user_data.phone is not None:
+                user.phone = user_data.phone
+                update_fields["phone"] = user_data.phone
+            if user_data.email is not None:
+                user.email = user_data.email
+                update_fields["email"] = user_data.email
+            if user_data.role is not None:
+                user.role = user_data.role
+                update_fields["role"] = user_data.role
+            if user_data.status is not None:
+                user.status = user_data.status
+                update_fields["status"] = user_data.status
+
             return True
