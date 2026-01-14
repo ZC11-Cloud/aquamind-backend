@@ -20,3 +20,8 @@ Content-Type: application/json
     "phone": "12345678901",
     "real_name": "Test User"
 }
+
+###
+
+GET 127.0.0.1:8000/chat
+Accept: application/json
