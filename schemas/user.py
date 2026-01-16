@@ -35,7 +35,7 @@ class UserInfo(BaseModel):
     email: EmailStr | None = None
     role: int
     status: int
-
+    avatar_url: str | None = None
     class Config:
         from_attributes = True
         use_enum_values = True

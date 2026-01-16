@@ -1,9 +1,12 @@
 import logging
+import os
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from langchain_openai import ChatOpenAI
+from starlette.staticfiles import StaticFiles
+
 from routers.user import router as user_router
 from routers.conversation import router as chat_router
 from settings import DASHSCOPE_API_KEY
@@ -25,6 +28,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# 配置静态文件访问（用于本地存储的头像）
+UPLOAD_DIR = "uploads"
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 app.include_router(user_router)
 app.include_router(chat_router)
 

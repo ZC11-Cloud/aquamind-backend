@@ -1,7 +1,9 @@
 import logging
+import os
+import uuid
 from datetime import timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,7 +19,10 @@ from utils.security import create_access_token
 router = APIRouter(prefix="/user", tags=["user"])
 logger = logging.getLogger(__name__)
 @router.post("/register", response_model=ResponseSchema)
-async def register(user: UserRegister, session: AsyncSession = Depends(get_session)):
+async def register(
+        user: UserRegister,
+        session: AsyncSession = Depends(get_session)
+):
     """用户注册"""
     # 1. 用户名密码不能为空
     if not user.username or not user.password:
@@ -31,7 +36,10 @@ async def register(user: UserRegister, session: AsyncSession = Depends(get_sessi
 
 
 @router.post("/login", response_model=Token)
-async def login(form_data: OAuth2PasswordRequestForm = Depends(), session: AsyncSession = Depends(get_session)):
+async def login(
+        form_data: OAuth2PasswordRequestForm = Depends(),
+        session: AsyncSession = Depends(get_session)
+):
     """用户登录"""
     username = form_data.username
     password = form_data.password
@@ -52,13 +60,19 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends(), session: Async
     return Token(access_token=access_token, token_type="bearer")
 
 @router.get("/me", response_model=UserInfo)
-async def read_users_me(current_user: UserInfo = Depends(get_current_user)):
+async def read_users_me(
+        current_user: UserInfo = Depends(get_current_user)
+):
     """获取当前登录用户信息"""
     return current_user
 
 
 @router.post("/password", response_model=ResponseSchema)
-async def change_password(user: UserPasswordChange, current_user: UserInfo = Depends(get_current_user), session: AsyncSession = Depends(get_session)):
+async def change_password(
+        user: UserPasswordChange,
+        current_user: UserInfo = Depends(get_current_user),
+        session: AsyncSession = Depends(get_session)
+):
     """修改用户密码"""
     # 1. 用户名密码不能为空
     if not user.username or not user.password or not user.new_password:
@@ -132,3 +146,87 @@ async def add_user(
     if not added:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Username already exists")
     return ResponseSchema(result="success", code=200, message="User added success")
+
+
+@router.post("/avatar", response_model=ResponseSchema)
+async def upload_avatar(
+        file: UploadFile = File(...),
+        current_user: User = Depends(get_current_user),
+        session: AsyncSession = Depends(get_session)
+):
+    """上传用户头像"""
+    # 1. 验证文件类型
+    allowed_extensions = {"png", "jpg", "jpeg", "gif"}
+    file_extension = os.path.splitext(file.filename)[1][1:].lower()
+    if file_extension not in allowed_extensions:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only png, jpg, and gif files are allowed"
+        )
+    # 2. 验证文件大小
+    MAX_FILE_SIZE = 5 * 1024 * 1024  # 5MB
+    contents = await file.read()
+    if len(contents) > MAX_FILE_SIZE:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="File size exceeds 5MB limit"
+        )
+    # 3.生成唯一的文件名
+    unique_filename = f"{current_user.id}_{uuid.uuid4()}.{file_extension}"
+
+    # 本地存储
+    UPLOAD_DIR = "uploads/avatars"
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
+    file_path = os.path.join(UPLOAD_DIR, unique_filename)
+    with open (file_path, "wb") as f:
+        f.write(contents)
+
+    bucket = "local"
+    object_key = file_path
+
+    # 4. 更新用户头像信息
+    user_service = UserService(session)
+    updated = await user_service.update_user_avatar(current_user.id, bucket, object_key)
+    if not updated:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    return ResponseSchema(
+        result="success",
+        code=200,
+        message="Avatar updated success"
+    )
+
+@router.get("/avatar/{user_id}", response_model=ResponseSchema)
+async def get_avatar(
+        user_id: int,
+        current_user: User = Depends(get_current_user),
+        session: AsyncSession = Depends(get_session)
+):
+    """获取用户头像"""
+    # 1. 权限检查： 普通用户只能查询自己，管理员可以查询所有用户
+    if current_user.role != 1 and user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to view this user avatar")
+    # 2. 查询用户头像
+    user_service = UserService(session)
+    user = await user_service.get_user_by_id(user_id)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+
+    # 3. 根据存储方式返回图像
+    if user.avatar_bucket == "local" and user.avatar_object_key:
+        # 本地存储： 返回文件内容
+        from fastapi.responses import FileResponse
+        return FileResponse(user.avatar_object_key)
+    elif user.avatar_bucket and user.avatar_object_key:
+        # 云存储： 返回重定向URL或直接返回文件
+        pass
+
+    # 4. 如果没有头像，返回默认头像
+    raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail="User avatar not found"
+    )

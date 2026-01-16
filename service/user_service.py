@@ -45,7 +45,6 @@ class UserService:
             user = await self.session.scalar(select(User).where(User.username == username))
             return user
 
-
     async def change_password(self, user_data: UserPasswordChange) -> bool:
         async with self.session.begin():
             # 1. 查询用户
@@ -92,3 +91,15 @@ class UserService:
             # 1. 查询用户
             user = await self.session.scalar(select(User).where(User.id == user_id))
             return user
+
+    async def update_user_avatar(self, user_id: int, bucket: str, object_key: str) -> bool:
+        """更新用户头像"""
+        async with self.session.begin():
+            # 1. 查询用户
+            user: User = await self.session.scalar(select(User).where(User.id == user_id))
+            if not user:
+                return False
+            # 2. 更新用户头像
+            user.avatar_bucket = bucket
+            user.avatar_object_key = object_key
+            return True
