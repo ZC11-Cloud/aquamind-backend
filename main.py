@@ -1,6 +1,6 @@
 import logging
 import os
-
+import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -37,21 +37,5 @@ app.include_router(user_router)
 app.include_router(chat_router)
 
 
-@app.get("/")
-async def root():
-    return {"message": "Hello World"}
-
-
-@app.get("/hello/{name}")
-async def say_hello(name: str):
-    return {"message": f"Hello {name}"}
-
-@app.get("/chat")
-async def chat():
-    llm = ChatOpenAI(
-        api_key=DASHSCOPE_API_KEY,
-        model="qwen-plus",
-        base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
-    )
-    response = llm.invoke("你好")
-    return {"message": response.content}
+if __name__ == "__main__":
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
