@@ -157,6 +157,11 @@ async def upload_avatar(
     """上传用户头像"""
     # 1. 验证文件类型
     allowed_extensions = {"png", "jpg", "jpeg", "gif"}
+    if not file.filename:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Filename is missing"
+        )
     file_extension = os.path.splitext(file.filename)[1][1:].lower()
     if file_extension not in allowed_extensions:
         raise HTTPException(
