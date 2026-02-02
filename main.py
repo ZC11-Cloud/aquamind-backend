@@ -8,7 +8,7 @@ from langchain_openai import ChatOpenAI
 from starlette.staticfiles import StaticFiles
 
 from routers.user import router as user_router
-from routers.conversation import router as chat_router
+from routers.qa import router as qa_router
 from settings import DASHSCOPE_API_KEY
 
 # 配置日志
@@ -34,7 +34,7 @@ UPLOAD_DIR = "uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 app.include_router(user_router)
-app.include_router(chat_router)
+app.include_router(qa_router)
 
 
 if __name__ == "__main__":
