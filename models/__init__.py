@@ -1,6 +1,6 @@
 from sqlalchemy import MetaData
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.orm import sessionmaker, DeclarativeBase
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+from sqlalchemy.orm import DeclarativeBase
 
 from settings import DB_URL
 
@@ -16,8 +16,8 @@ engine = create_async_engine(
 )
 
 
-# 创建会话工厂
-AsyncSessionFactory = sessionmaker(
+# 创建异步会话工厂
+AsyncSessionFactory = async_sessionmaker(
     bind=engine,
     expire_on_commit=False,
     autoflush=True,
@@ -35,3 +35,4 @@ class Base(DeclarativeBase):
 })
 
 from . import user
+from . import chat
