@@ -1,4 +1,4 @@
-from sqlalchemy import Integer, String, DateTime, Enum, text, func
+from sqlalchemy import Integer, String, DateTime, Enum, text, func, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from models import Base
@@ -19,5 +19,5 @@ class QaMessage(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     conversation_id: Mapped[int] = mapped_column(Integer, nullable=False)
     role: Mapped[str] = mapped_column(Enum('user', 'assistant'), nullable=False)
-    content: Mapped[str] = mapped_column(String(255), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
     create_time: Mapped[datetime] = mapped_column(DateTime, server_default=text('CURRENT_TIMESTAMP'))

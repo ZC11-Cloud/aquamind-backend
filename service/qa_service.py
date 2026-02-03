@@ -5,11 +5,12 @@ from typing import List, Optional
 
 from models.qa import QaConversation, QaMessage
 from schemas.qa import QaConversationCreate, QaMessageCreate
-
+from service.ai_service import AIService
 
 class QaService:
-    def __init__(self, session: AsyncSession):
+    def __init__(self, session: AsyncSession, ai_service: AIService):
         self.session = session
+        self.ai_service = ai_service
 
     async def create_conversation(self, user_id: int, conversation_data: QaConversationCreate) -> QaConversation:
         """创建新的会话"""
@@ -43,12 +44,29 @@ class QaService:
           )
           self.session.add(user_message)
 
-          # 这里应该添加调用AI生成回复的逻辑
-          # 为了演示，我们创建一个简单的模拟回复
+          # 获取对话历史
+          history_stmt = select(QaMessage).where(
+              QaMessage.conversation_id == conversation_id
+          ).order_by(QaMessage.create_time.asc())
+          history_result = await self.session.execute(history_stmt)
+          history_messages = history_result.scalars().all()
+
+          # 转换为AI服务需要的格式
+          messages_history = []
+          for msg in history_messages:
+              messages_history.append({
+                  "role": msg.role,
+                  "content": msg.content
+              })
+          # 调用AI服务生成回复
+          ai_response = await self.ai_service.generate_response(
+              messages=messages_history,
+              system_prompt="你是一个智能助手，帮助用户解答问题。"
+          )
           assistant_message = QaMessage(
               conversation_id=conversation_id,
               role="assistant",
-              content=f"我收到了你的消息：{message_data.content}"
+              content=ai_response
           )
           self.session.add(assistant_message)
 
