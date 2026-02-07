@@ -4,10 +4,10 @@ from typing import List
 import os
 from dotenv import load_dotenv
 
-from dependencies import get_session, get_current_user
-from models.user import User
-from models.qa import QaConversation
-from schemas.qa import (
+from src.dependencies import get_session, get_current_user
+from src.models.user import User
+from src.models.qa import QaConversation
+from src.schemas.qa import (
     QaConversationCreate,
     QaConversationResponse,
     QaConversationListResponse,
@@ -15,9 +15,9 @@ from schemas.qa import (
     QaMessageResponse,
     QaMessageListResponse
 )
-from service.qa_service import QaService
-from service.ai_service import create_ai_service
-from settings import DASHSCOPE_API_KEY
+from src.service.qa_service import QaService
+from src.service.ai_service import create_ai_service
+from src.settings import DASHSCOPE_API_KEY
 router = APIRouter(prefix='/qa', tags=["qa"])
 
 if not DASHSCOPE_API_KEY:

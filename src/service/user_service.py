@@ -1,9 +1,9 @@
 from sqlalchemy import select, exists
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from models.user import User
-from schemas.user import UserRegister, UserLogin, UserPasswordChange, UserInfo
-from utils.security import hash_password, verify_password
+from src.models.user import User
+from src.schemas.user import UserRegister, UserLogin, UserPasswordChange, UserInfo
+from src.utils.security import hash_password, verify_password
 
 class UserService:
     def __init__(self, session: AsyncSession):

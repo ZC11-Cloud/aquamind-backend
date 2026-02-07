@@ -2,7 +2,7 @@ from sqlalchemy import MetaData
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
 
-from settings import DB_URL
+from src.settings import DB_URL
 
 # 创建引擎对象
 engine = create_async_engine(

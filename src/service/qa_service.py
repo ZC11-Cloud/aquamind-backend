@@ -3,9 +3,9 @@ from sqlalchemy.future import select
 from sqlalchemy import func
 from typing import List, Optional
 
-from models.qa import QaConversation, QaMessage
-from schemas.qa import QaConversationCreate, QaMessageCreate
-from service.ai_service import AIService
+from src.models.qa import QaConversation, QaMessage
+from src.schemas.qa import QaConversationCreate, QaMessageCreate
+from src.service.ai_service import AIService
 
 class QaService:
     def __init__(self, session: AsyncSession, ai_service: AIService):
