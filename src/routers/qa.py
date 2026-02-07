@@ -103,3 +103,22 @@ async def get_messages(
         messages=[QaMessageResponse.model_validate(m) for m in messages],
         total=total
     )
+
+@router.delete("/conversations/{conversation_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_conversation(
+    conversation_id: int,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session)
+):
+    """删除会话及其所有消息"""
+    qa_service = QaService(session, ai_service)
+    success = await qa_service.delete_conversation(conversation_id, current_user.id)
+    
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="会话不存在或不属于该用户"
+        )
+    
+    # 返回204 No Content表示成功删除
+    return None

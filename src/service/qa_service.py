@@ -1,6 +1,6 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy import func
+from sqlalchemy import func, delete
 from typing import List, Optional
 
 from src.models.qa import QaConversation, QaMessage
@@ -122,3 +122,27 @@ class QaService:
           messages = list(result.scalars().all())
 
           return messages, total
+        
+    async def delete_conversation(self, conversation_id: int, user_id: int) -> bool:
+        async with self.session.begin():
+          """删除会话"""
+          # 首先验证会话是否属于该用户
+          conversation_stmt = select(QaConversation).where(
+              QaConversation.id == conversation_id,
+              QaConversation.user_id == user_id
+          )
+          conversation_result = await self.session.execute(conversation_stmt)
+          conversation = conversation_result.scalar_one_or_none()
+
+          if not conversation:
+              return False
+
+          # 删除会话中的所有消息
+          delete_messages_stmt = delete(QaMessage).where(
+              QaMessage.conversation_id == conversation_id
+          )
+          await self.session.execute(delete_messages_stmt)
+
+          # 删除会话
+          await self.session.delete(conversation)
+          return True
