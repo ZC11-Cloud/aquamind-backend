@@ -1,7 +1,7 @@
 from sqlalchemy import Integer, String, DateTime, Enum, text, func, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
-from models import Base
+from src.models import Base
 from datetime import datetime
 
 class QaConversation(Base):

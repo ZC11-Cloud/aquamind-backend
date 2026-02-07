@@ -1,7 +1,7 @@
 
 from jose import JWTError, jwt
 from passlib.context import CryptContext
-from settings import SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES
+from src.settings import SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 

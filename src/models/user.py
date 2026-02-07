@@ -3,7 +3,7 @@ from datetime import datetime
 from sqlalchemy import Integer, String, DateTime, text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
-from models import Base
+from src.models import Base
 
 NORMAL_ROLE = 0
 ADMIN_ROLE = 1
