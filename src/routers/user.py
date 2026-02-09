@@ -13,7 +13,7 @@ from src.models.user import User
 from src.schemas.response import ResponseSchema
 from src.schemas.user import UserRegister, UserLogin, Token, UserInfo, UserPasswordChange
 from src.service.user_service import UserService
-from src.settings import ACCESS_TOKEN_EXPIRE_MINUTES
+from src.settings import ACCESS_TOKEN_EXPIRE_MINUTES, UPLOAD_DIR
 from src.utils.security import create_access_token
 
 router = APIRouter(prefix="/user", tags=["user"])
@@ -179,10 +179,10 @@ async def upload_avatar(
     # 3.生成唯一的文件名
     unique_filename = f"{current_user.id}_{uuid.uuid4()}.{file_extension}"
 
-    # 本地存储
-    UPLOAD_DIR = "uploads/avatars"
-    os.makedirs(UPLOAD_DIR, exist_ok=True)
-    file_path = os.path.join(UPLOAD_DIR, unique_filename)
+    # 本地存储（与 main.py 静态目录一致，使用统一配置 UPLOAD_DIR）
+    avatar_dir = os.path.join(UPLOAD_DIR, "avatars")
+    os.makedirs(avatar_dir, exist_ok=True)
+    file_path = os.path.join(avatar_dir, unique_filename)
     with open (file_path, "wb") as f:
         f.write(contents)
 

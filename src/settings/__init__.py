@@ -14,3 +14,6 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 30
 DASHSCOPE_API_KEY = os.getenv("DASHSCOPE_API_KEY")
 if not DASHSCOPE_API_KEY:
     raise ValueError("DASHSCOPE_API_KEY环境变量未设置！")
+
+# 上传文件根目录（用于头像等静态文件，默认 uploads，避免在项目下生成 static 目录）
+UPLOAD_DIR = os.getenv("UPLOAD_DIR", "uploads")
