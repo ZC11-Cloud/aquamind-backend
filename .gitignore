@@ -16,6 +16,9 @@ settings/__init__.py
 alembic/versions/*.pyc
 alembic/versions/__pycache__/
 
+# YOLOv8 权重文件（体积大，不提交到 Git）
+weights/*.pt
+
 # Ignore test files and other temporary files
 *.log
 *.lock
