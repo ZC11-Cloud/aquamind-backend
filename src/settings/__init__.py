@@ -20,3 +20,9 @@ UPLOAD_DIR = os.getenv("UPLOAD_DIR", "backend/uploads")
 
 # YOLOv8 权重文件路径（绝对路径或相对于项目根目录，例如 weights/best.pt）
 YOLO_WEIGHTS_PATH = os.getenv("YOLO_WEIGHTS_PATH", "weights/best.pt")
+
+KNOWLEDGE_UPLOAD_DIR = os.getenv("KNOWLEDGE_UPLOAD_DIR", "backend/uploads/knowledge")
+CHROMA_PERSIST_DIR = os.getenv("CHROMA_PERSIST_DIR", "backend/data/chroma_kb")
+RAG_TOP_K = os.getenv("RAG_TOP_K", 5)
+RAG_CHUNK_SIZE = os.getenv("RAG_CHUNK_SIZE", 500)
+RAG_CHUNK_OVERLAP = os.getenv("RAG_CHUNK_OVERLAP", 50)
