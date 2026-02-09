@@ -4,6 +4,7 @@
 """
 import os
 import logging
+from collections import defaultdict
 from pathlib import Path
 from typing import List, Optional
 
@@ -141,6 +142,33 @@ class KnowledgeService:
         self._vector_store.delete(ids=ids)
         logger.info("知识库删除完成: source=%s, chunks=%d", source_id, len(ids))
         return len(ids)
+
+    def list_document_sources(self, limit: int = 10000) -> List[dict]:
+        """
+        列出当前 collection 中所有文档的 source_id 及对应 chunk 数（用于文档列表接口）。
+
+        :param limit: 从 Chroma 拉取的最大条数，用于去重前采样。
+        :return: [{"source_id": str, "chunk_count": int}, ...]
+        """
+        try:
+            coll = self._vector_store._collection
+        except AttributeError:
+            coll = getattr(self._vector_store, "collection", None)
+        if coll is None:
+            return []
+        try:
+            res = coll.get(limit=limit, include=["metadatas"])
+            metadatas = res.get("metadatas") or []
+            ids = res.get("ids") or []
+        except Exception as e:
+            logger.exception("Chroma list 失败: %s", e)
+            return []
+        # 按 source 聚合计数（id 形如 source_i）
+        count_by_source: dict = defaultdict(int)
+        for meta in metadatas:
+            if isinstance(meta, dict) and "source" in meta:
+                count_by_source[meta["source"]] += 1
+        return [{"source_id": sid, "chunk_count": c} for sid, c in sorted(count_by_source.items())]
 
     def get_retriever(self, top_k: Optional[int] = None, **kwargs):
         """

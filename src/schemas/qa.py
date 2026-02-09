@@ -6,6 +6,7 @@ from pydantic import BaseModel
 class QaMessageCreate(BaseModel):
     """创建消息的请求模型"""
     content: str
+    use_rag: bool = False  # 是否基于知识库检索回答（RAG）
 
 
 class QaMessageResponse(BaseModel):

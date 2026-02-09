@@ -17,13 +17,17 @@ from src.schemas.qa import (
 )
 from src.service.qa_service import QaService
 from src.service.ai_service import create_ai_service
+from src.service.knowledge_service import create_knowledge_service
+from src.service.rag_service import create_rag_service
 from src.settings import DASHSCOPE_API_KEY
+
 router = APIRouter(prefix='/qa', tags=["qa"])
 
 if not DASHSCOPE_API_KEY:
     raise ValueError("DASHSCOPE_API_KEY is not configured")
-print(DASHSCOPE_API_KEY)
 ai_service = create_ai_service(api_key=DASHSCOPE_API_KEY)
+knowledge_service = create_knowledge_service()
+rag_service = create_rag_service(ai_service=ai_service, knowledge_service=knowledge_service)
 @router.post("/conversations", response_model=QaConversationResponse, status_code=status.HTTP_201_CREATED)
 async def create_conversation(
     conversation_data: QaConversationCreate,
@@ -31,7 +35,7 @@ async def create_conversation(
     session: AsyncSession = Depends(get_session)
 ):
     """创建新的会话"""
-    qa_service = QaService(session, ai_service)
+    qa_service = QaService(session, ai_service, rag_service=rag_service)
     conversation = await qa_service.create_conversation(current_user.id, conversation_data)
     # 在返回前确保所有属性已加载
     await session.refresh(conversation)
@@ -51,8 +55,8 @@ async def send_message(
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session)
 ):
-    """发送消息到会话"""
-    qa_service = QaService(session, ai_service)
+    """发送消息到会话；请求体中 use_rag=true 时将基于知识库检索回答。"""
+    qa_service = QaService(session, ai_service, rag_service=rag_service)
     message = await qa_service.send_message(conversation_id, current_user.id, message_data)
     
     if not message:
@@ -78,7 +82,7 @@ async def get_conversations(
     session: AsyncSession = Depends(get_session)
 ):
     """获取用户的会话列表"""
-    qa_service = QaService(session, ai_service)
+    qa_service = QaService(session, ai_service, rag_service=rag_service)
     conversations, total = await qa_service.get_conversations(current_user.id, skip, limit)
 
     return QaConversationListResponse(
@@ -96,7 +100,7 @@ async def get_messages(
     session: AsyncSession = Depends(get_session)
 ):
     """获取会话的聊天记录"""
-    qa_service = QaService(session, ai_service)
+    qa_service = QaService(session, ai_service, rag_service=rag_service)
     messages, total = await qa_service.get_messages(conversation_id, current_user.id, skip, limit)
     
     return QaMessageListResponse(
@@ -111,7 +115,7 @@ async def delete_conversation(
     session: AsyncSession = Depends(get_session)
 ):
     """删除会话及其所有消息"""
-    qa_service = QaService(session, ai_service)
+    qa_service = QaService(session, ai_service, rag_service=rag_service)
     success = await qa_service.delete_conversation(conversation_id, current_user.id)
     
     if not success:

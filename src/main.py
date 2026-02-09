@@ -10,7 +10,8 @@ from starlette.staticfiles import StaticFiles
 from src.routers.user import router as user_router
 from src.routers.qa import router as qa_router
 from src.routers.image import router as image_router
-from src.settings import DASHSCOPE_API_KEY, UPLOAD_DIR
+from src.routers.knowledge import router as knowledge_router
+from src.settings import DASHSCOPE_API_KEY, UPLOAD_DIR, KNOWLEDGE_UPLOAD_DIR
 
 # 配置日志
 logging.basicConfig(
@@ -32,10 +33,12 @@ app.add_middleware(
 
 # 配置静态文件访问（用于本地存储的头像），路径统一从 settings.UPLOAD_DIR 读取，避免在源路径再生成 static
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+os.makedirs(KNOWLEDGE_UPLOAD_DIR, exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 app.include_router(user_router)
 app.include_router(qa_router)
 app.include_router(image_router)
+app.include_router(knowledge_router)
 
 
 if __name__ == "__main__":

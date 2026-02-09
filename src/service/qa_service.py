@@ -1,16 +1,26 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy import func, delete
-from typing import List, Optional
+from typing import List, Optional, TYPE_CHECKING
 
 from src.models.qa import QaConversation, QaMessage
 from src.schemas.qa import QaConversationCreate, QaMessageCreate
 from src.service.ai_service import AIService
 
+if TYPE_CHECKING:
+    from src.service.rag_service import RAGService
+
+
 class QaService:
-    def __init__(self, session: AsyncSession, ai_service: AIService):
+    def __init__(
+        self,
+        session: AsyncSession,
+        ai_service: AIService,
+        rag_service: Optional["RAGService"] = None,
+    ):
         self.session = session
         self.ai_service = ai_service
+        self.rag_service = rag_service
 
     async def create_conversation(self, user_id: int, conversation_data: QaConversationCreate) -> QaConversation:
         """创建新的会话"""
@@ -58,11 +68,18 @@ class QaService:
                   "role": msg.role,
                   "content": msg.content
               })
-          # 调用AI服务生成回复
-          ai_response = await self.ai_service.generate_response(
-              messages=messages_history,
-              system_prompt="你是一个智能助手，帮助用户解答问题。"
-          )
+          # 根据是否启用 RAG 选择调用方式
+          if getattr(message_data, "use_rag", False) and self.rag_service:
+              ai_response = await self.rag_service.generate_response_with_rag(
+                  question=message_data.content,
+                  messages=messages_history,
+                  system_prompt_prefix="你是一个智能助手，帮助用户解答问题。请尽量基于以下参考内容回答；若参考内容未涉及，可简要说明并建议用户补充。",
+              )
+          else:
+              ai_response = await self.ai_service.generate_response(
+                  messages=messages_history,
+                  system_prompt="你是一个智能助手，帮助用户解答问题。"
+              )
           assistant_message = QaMessage(
               conversation_id=conversation_id,
               role="assistant",
