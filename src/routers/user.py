@@ -43,14 +43,19 @@ async def login(
     """用户登录"""
     username = form_data.username
     password = form_data.password
+    pwd_bytes = len(password.encode("utf-8"))
+    logger.info("login: 收到登录请求 username=%s, 密码长度=%d 字节", username, pwd_bytes)
     # 1. 用户名密码不能为空
     if not username or not password:
+        logger.warning("login: 用户名或密码为空")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Username and password cannot be empty")
     # 2. 登录
     user_service = UserService(session)
     user = await user_service.login_user(UserLogin(username=username, password=password))
     if not user:
+        logger.warning("login: 登录失败 username=%s", username)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Incorrect username or password")
+    logger.info("login: 登录成功 username=%s", username)
     # 3. 创建访问令牌
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
