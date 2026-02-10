@@ -26,3 +26,4 @@ weights/*.pt
 dist/
 build/
 *.http
+data/chroma_kb/chroma.sqlite3
