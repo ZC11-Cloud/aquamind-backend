@@ -20,9 +20,10 @@ logging.basicConfig(
     handlers=[logging.StreamHandler()]
 )
 app = FastAPI()
-origins = [
-    "http://localhost:5173",
-]
+CORS_ORIGINS=os.getenv("CORS_ORIGINS")
+if not CORS_ORIGINS:
+    raise ValueError("CORS_ORIGINS环境变量未设置！")
+origins = CORS_ORIGINS.split(",")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,

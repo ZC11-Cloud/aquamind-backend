@@ -4,10 +4,13 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-DB_URL = "mysql+aiomysql://root:123456@localhost:3306/aquamind?charset=utf8mb4"
-
+DB_URL = os.getenv("DB_URL")
+if not DB_URL:
+    raise ValueError("DB_URL环境变量未设置！")
 # JWT配置
-SECRET_KEY = "cb2a0bb6fbe86bde71b847bde46937daeb58fd1af43fa54c730b12a5a86af318"
+SECRET_KEY = os.getenv("SECRET_KEY")
+if not SECRET_KEY:
+    raise ValueError("SECRET_KEY环境变量未设置！")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
