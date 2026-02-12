@@ -65,6 +65,7 @@ class RAGService:
         # 检索为同步调用，放入线程池避免阻塞事件循环
         try:
             docs = await asyncio.to_thread(retriever.invoke, question)
+            logger.info("知识库已调用, 检索问题=%s, 命中条数=%d", question[:50], len(docs))
         except Exception as e:
             logger.exception("知识库检索失败: %s", e)
             docs = []

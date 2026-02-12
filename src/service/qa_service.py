@@ -1,9 +1,12 @@
+import logging
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy import func, delete
 from typing import List, Optional, TYPE_CHECKING
 
 from src.models.qa import QaConversation, QaMessage
+
+logger = logging.getLogger(__name__)
 from src.schemas.qa import QaConversationCreate, QaMessageCreate
 from src.service.ai_service import AIService
 
@@ -69,13 +72,17 @@ class QaService:
                   "content": msg.content
               })
           # 根据是否启用 RAG 选择调用方式
-          if getattr(message_data, "use_rag", False) and self.rag_service:
+          use_rag = getattr(message_data, "use_rag", False) and self.rag_service
+          if use_rag:
+              logger.info("本次回答使用知识库 (RAG), conversation_id=%s", conversation_id)
               ai_response = await self.rag_service.generate_response_with_rag(
                   question=message_data.content,
                   messages=messages_history,
                   system_prompt_prefix="你是一个智能助手，帮助用户解答问题。请尽量基于以下参考内容回答；若参考内容未涉及，可简要说明并建议用户补充。",
               )
           else:
+              logger.info("本次回答未使用知识库, conversation_id=%s (use_rag=%s, rag_service=%s)",
+                         conversation_id, getattr(message_data, "use_rag", False), self.rag_service is not None)
               ai_response = await self.ai_service.generate_response(
                   messages=messages_history,
                   system_prompt="你是一个智能助手，帮助用户解答问题。"
