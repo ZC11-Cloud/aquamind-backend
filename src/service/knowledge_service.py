@@ -77,6 +77,9 @@ class KnowledgeService:
         loader_cls = LOADER_MAP.get(ext)
         if loader_cls is None:
             return None
+        # .txt/.md 统一用 UTF-8 解码，避免 Windows 下默认 gbk 导致 UnicodeDecodeError
+        if loader_cls is TextLoader:
+            return TextLoader(file_path, encoding="utf-8")
         return loader_cls(file_path)
 
     def _load_documents(self, file_path: str) -> List[Document]:

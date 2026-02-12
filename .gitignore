@@ -26,4 +26,7 @@ weights/*.pt
 dist/
 build/
 *.http
-data/chroma_kb/chroma.sqlite3
+data/chroma_kb/*.sqlite3
+
+# 用户上传的知识库文件（运行时生成，不提交）
+uploads/
