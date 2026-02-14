@@ -6,7 +6,7 @@ import os
 import logging
 from collections import defaultdict
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from langchain_core.documents import Document
 try:
@@ -29,6 +29,9 @@ logger = logging.getLogger(__name__)
 
 # 单库单 collection 名称
 DEFAULT_COLLECTION_NAME = "aquamind_kb"
+
+# 简介截取长度（字符数，用于前端展示）
+SUMMARY_SNIPPET_LENGTH = 300
 
 # 支持的文档后缀与 Loader 映射（按需扩展）
 LOADER_MAP = {
@@ -94,29 +97,33 @@ class KnowledgeService:
             )
         return loader.load()
 
-    def add_document(self, file_path: str, source_id: Optional[str] = None) -> int:
+    def add_document(self, file_path: str, source_id: Optional[str] = None) -> Tuple[int, str]:
         """
         将单个文档解析、分块、向量化并写入当前 Chroma collection。
 
         :param file_path: 文档绝对路径或相对路径。
         :param source_id: 用于检索与删除的文档标识，默认使用文件 basename。
-        :return: 写入的 chunk 数量。
+        :return: (写入的 chunk 数量, 内容截取片段用于简介展示)
         """
         file_path = os.path.abspath(file_path)
         source = source_id or os.path.basename(file_path)
         raw_docs = self._load_documents(file_path)
         if not raw_docs:
             logger.warning("文档未解析出内容: %s", file_path)
-            return 0
+            return 0, ""
         for doc in raw_docs:
             doc.metadata["source"] = source
+        full_text = "".join(d.page_content for d in raw_docs).replace("\r\n", "\n").strip()
+        snippet = full_text[:SUMMARY_SNIPPET_LENGTH] if full_text else ""
+        if len(full_text) > SUMMARY_SNIPPET_LENGTH:
+            snippet += "…"
         splits = self._text_splitter.split_documents(raw_docs)
         if not splits:
-            return 0
+            return 0, snippet
         ids = [f"{source}_{i}" for i in range(len(splits))]
         self._vector_store.add_documents(splits, ids=ids)
         logger.info("知识库写入完成: source=%s, chunks=%d", source, len(splits))
-        return len(splits)
+        return len(splits), snippet
 
     def delete_document(self, source_id: str) -> int:
         """

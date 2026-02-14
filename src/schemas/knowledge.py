@@ -1,6 +1,7 @@
 """知识库相关请求/响应模型。"""
+from datetime import datetime
 from typing import List
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class KnowledgeUploadResponse(BaseModel):
@@ -12,18 +13,26 @@ class KnowledgeUploadResponse(BaseModel):
 
 
 class KnowledgeDocumentItem(BaseModel):
-    """文档列表项（单库下以 source_id 唯一标识）"""
+    """文档列表项：用于列表与详情展示"""
     source_id: str
-    chunk_count: int
+    original_filename: str
+    summary: str | None = None
+    tags: List[str] = []
+    create_time: datetime
+    chunk_count: int = 0
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 class KnowledgeDocumentListResponse(BaseModel):
-    """文档列表响应"""
+    """文档列表响应（分页）"""
     documents: List[KnowledgeDocumentItem]
     total: int
+    page: int = 1
+    page_size: int = 20
 
 
 class KnowledgeDeleteResponse(BaseModel):
-    """删除文档响应（可选，用于返回删除条数）"""
+    """删除文档响应"""
     source_id: str
     chunks_deleted: int
