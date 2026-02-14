@@ -36,3 +36,4 @@ class Base(DeclarativeBase):
 
 from . import user
 from . import qa
+from . import document
