@@ -31,3 +31,4 @@ data/chroma_kb/*
 
 # 用户上传的知识库文件（运行时生成，不提交）
 uploads/
+data/chroma_kb/chroma.sqlite3
