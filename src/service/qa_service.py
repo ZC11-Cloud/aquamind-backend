@@ -2,7 +2,7 @@ import logging
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy import func, delete
-from typing import List, Optional, TYPE_CHECKING
+from typing import List, Optional, TYPE_CHECKING, AsyncGenerator
 
 from src.models.qa import QaConversation, QaMessage
 
@@ -95,6 +95,78 @@ class QaService:
           self.session.add(assistant_message)
 
           return assistant_message
+
+    async def send_message_stream(
+        self,
+        conversation_id: int,
+        user_id: int,
+        message_data: QaMessageCreate,
+    ) -> AsyncGenerator[str, None]:
+        """
+        流式发送消息：先落库用户消息，再按 chunk 流式生成 AI 回复并 yield，最后落库 assistant 消息。
+        若会话不存在或不属于当前用户，抛出 ValueError，由上层转为 404。
+        """
+        async with self.session.begin():
+            conversation_stmt = select(QaConversation).where(
+                QaConversation.id == conversation_id,
+                QaConversation.user_id == user_id,
+            )
+            conversation_result = await self.session.execute(conversation_stmt)
+            conversation = conversation_result.scalar_one_or_none()
+            if not conversation:
+                raise ValueError("会话不存在或不属于该用户")
+
+            user_message = QaMessage(
+                conversation_id=conversation_id,
+                role="user",
+                content=message_data.content,
+            )
+            self.session.add(user_message)
+            await self.session.flush()
+
+            history_stmt = select(QaMessage).where(
+                QaMessage.conversation_id == conversation_id
+            ).order_by(QaMessage.create_time.asc())
+            history_result = await self.session.execute(history_stmt)
+            history_messages = history_result.scalars().all()
+            messages_history = [
+                {"role": msg.role, "content": msg.content} for msg in history_messages
+            ]
+
+        use_rag = getattr(message_data, "use_rag", False) and self.rag_service
+        full_content: List[str] = []
+
+        try:
+            if use_rag:
+                logger.info(
+                    "本次流式回答使用知识库 (RAG), conversation_id=%s", conversation_id
+                )
+                ai_response = await self.rag_service.generate_response_with_rag(
+                    question=message_data.content,
+                    messages=messages_history,
+                    system_prompt_prefix="你是一个智能助手，帮助用户解答问题。请尽量基于以下参考内容回答；若参考内容未涉及，可简要说明并建议用户补充。",
+                )
+                full_content = [ai_response]
+                yield ai_response
+            else:
+                logger.info(
+                    "本次流式回答未使用知识库, conversation_id=%s",
+                    conversation_id,
+                )
+                async for chunk in self.ai_service.generate_response_stream(
+                    messages=messages_history,
+                    system_prompt="你是一个智能助手，帮助用户解答问题。",
+                ):
+                    full_content.append(chunk)
+                    yield chunk
+        finally:
+            async with self.session.begin():
+                assistant_message = QaMessage(
+                    conversation_id=conversation_id,
+                    role="assistant",
+                    content="".join(full_content),
+                )
+                self.session.add(assistant_message)
 
     async def get_conversations(self, user_id: int, skip: int = 0, limit: int = 10) -> tuple[List[QaConversation], int]:
         async with self.session.begin():

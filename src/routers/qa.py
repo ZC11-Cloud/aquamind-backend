@@ -1,4 +1,6 @@
+import json
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List
 import os
@@ -71,6 +73,40 @@ async def send_message(
         role=message.role,
         content=message.content,
         create_time=message.create_time
+    )
+
+
+@router.post("/conversations/{conversation_id}/messages/stream")
+async def send_message_stream(
+    conversation_id: int,
+    message_data: QaMessageCreate,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """流式发送消息到会话，返回 SSE 流；请求体中 use_rag=true 时基于知识库检索回答。"""
+    qa_service = QaService(session, ai_service, rag_service=rag_service)
+
+    async def event_stream():
+        try:
+            async for chunk in qa_service.send_message_stream(
+                conversation_id, current_user.id, message_data
+            ):
+                # SSE 格式：data: <payload>\n\n，payload 为 JSON 便于前端解析
+                payload = json.dumps({"type": "chunk", "content": chunk}, ensure_ascii=False)
+                yield f"data: {payload}\n\n"
+            yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
+        except ValueError as e:
+            yield f"data: {json.dumps({'type': 'error', 'detail': str(e)}, ensure_ascii=False)}\n\n"
+
+    # 校验失败时 send_message_stream 在迭代时抛出 ValueError，在 event_stream 内捕获并 yield error 事件
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
     )
 
 

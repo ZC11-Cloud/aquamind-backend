@@ -1,4 +1,4 @@
-from typing import List, Dict, Any
+from typing import List, Dict, Any, AsyncGenerator
 from langchain_openai import ChatOpenAI
 from langchain_community.chat_models.tongyi import ChatTongyi
 from langchain.messages import HumanMessage, AIMessage, SystemMessage
@@ -47,6 +47,41 @@ class AIService:
         if isinstance(content, list):
             content = str(content)
         return content
+
+    async def generate_response_stream(
+        self,
+        messages: List[Dict[str, str]],
+        system_prompt: str = "your are a helpful assistant",
+    ) -> AsyncGenerator[str, None]:
+        """
+        流式生成AI回复，按 token/chunk 逐步 yield 内容。
+
+        Args:
+            messages: 消息历史记录，格式为[{"role": "user", "content": "消息内容"}, ...]
+            system_prompt: 系统提示词
+
+        Yields:
+            每个生成片段的字符串内容（delta）
+        """
+        langchain_messages = []
+
+        if system_prompt:
+            langchain_messages.append(SystemMessage(content=system_prompt))
+
+        for msg in messages:
+            if msg["role"] == "user":
+                langchain_messages.append(HumanMessage(content=msg["content"]))
+            elif msg["role"] == "assistant":
+                langchain_messages.append(AIMessage(content=msg["content"]))
+
+        async for chunk in self.chat_model.astream(langchain_messages):
+            content = chunk.content
+            if content is None:
+                continue
+            if isinstance(content, list):
+                content = str(content)
+            if isinstance(content, str) and content:
+                yield content
 
 
 # 工厂函数，用于创建AIService实例
