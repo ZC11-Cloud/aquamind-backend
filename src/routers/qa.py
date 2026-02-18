@@ -1,4 +1,5 @@
 import json
+import logging
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,8 +22,11 @@ from src.service.qa_service import QaService
 from src.service.ai_service import create_ai_service
 from src.service.knowledge_service import create_knowledge_service
 from src.service.rag_service import create_rag_service
-from src.settings import DASHSCOPE_API_KEY
+from src.service.agent_service import create_agent_service
+from src.service.yolo_service import get_yolo_service
+from src.settings import DASHSCOPE_API_KEY, YOLO_WEIGHTS_PATH
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix='/qa', tags=["qa"])
 
 if not DASHSCOPE_API_KEY:
@@ -30,6 +34,24 @@ if not DASHSCOPE_API_KEY:
 ai_service = create_ai_service(api_key=DASHSCOPE_API_KEY)
 knowledge_service = create_knowledge_service()
 rag_service = create_rag_service(ai_service=ai_service, knowledge_service=knowledge_service)
+_yolo_service = None
+try:
+    _yolo_service = get_yolo_service(YOLO_WEIGHTS_PATH)
+except FileNotFoundError:
+    pass
+agent_service = create_agent_service(
+    ai_service=ai_service,
+    knowledge_service=knowledge_service,
+    yolo_service=_yolo_service,
+)
+
+
+def _get_qa_service(session):
+    return QaService(
+        session, ai_service,
+        rag_service=rag_service,
+        agent_service=agent_service,
+    )
 @router.post("/conversations", response_model=QaConversationResponse, status_code=status.HTTP_201_CREATED)
 async def create_conversation(
     conversation_data: QaConversationCreate,
@@ -37,7 +59,7 @@ async def create_conversation(
     session: AsyncSession = Depends(get_session)
 ):
     """创建新的会话"""
-    qa_service = QaService(session, ai_service, rag_service=rag_service)
+    qa_service = _get_qa_service(session)
     conversation = await qa_service.create_conversation(current_user.id, conversation_data)
     # 在返回前确保所有属性已加载
     await session.refresh(conversation)
@@ -58,7 +80,7 @@ async def send_message(
     session: AsyncSession = Depends(get_session)
 ):
     """发送消息到会话；请求体中 use_rag=true 时将基于知识库检索回答。"""
-    qa_service = QaService(session, ai_service, rag_service=rag_service)
+    qa_service = _get_qa_service(session)
     message = await qa_service.send_message(conversation_id, current_user.id, message_data)
     
     if not message:
@@ -83,22 +105,24 @@ async def send_message_stream(
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
-    """流式发送消息到会话，返回 SSE 流；请求体中 use_rag=true 时基于知识库检索回答。"""
-    qa_service = QaService(session, ai_service, rag_service=rag_service)
+    """流式发送消息到会话，返回 SSE 流；支持 use_rag/use_image/image_base64，Agent 自动或按开关调用工具。"""
+    qa_service = _get_qa_service(session)
 
     async def event_stream():
         try:
             async for chunk in qa_service.send_message_stream(
                 conversation_id, current_user.id, message_data
             ):
-                # SSE 格式：data: <payload>\n\n，payload 为 JSON 便于前端解析
                 payload = json.dumps({"type": "chunk", "content": chunk}, ensure_ascii=False)
                 yield f"data: {payload}\n\n"
             yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
         except ValueError as e:
             yield f"data: {json.dumps({'type': 'error', 'detail': str(e)}, ensure_ascii=False)}\n\n"
+        except Exception as e:
+            logger.exception("流式消息异常: %s", e)
+            yield f"data: {json.dumps({'type': 'error', 'detail': str(e)}, ensure_ascii=False)}\n\n"
 
-    # 校验失败时 send_message_stream 在迭代时抛出 ValueError，在 event_stream 内捕获并 yield error 事件
+    # 校验失败抛出 ValueError；其他异常统一 yield error 事件供前端展示
     return StreamingResponse(
         event_stream(),
         media_type="text/event-stream",
@@ -118,7 +142,7 @@ async def get_conversations(
     session: AsyncSession = Depends(get_session)
 ):
     """获取用户的会话列表"""
-    qa_service = QaService(session, ai_service, rag_service=rag_service)
+    qa_service = _get_qa_service(session)
     conversations, total = await qa_service.get_conversations(current_user.id, skip, limit)
 
     return QaConversationListResponse(
@@ -136,7 +160,7 @@ async def get_messages(
     session: AsyncSession = Depends(get_session)
 ):
     """获取会话的聊天记录"""
-    qa_service = QaService(session, ai_service, rag_service=rag_service)
+    qa_service = _get_qa_service(session)
     messages, total = await qa_service.get_messages(conversation_id, current_user.id, skip, limit)
     
     return QaMessageListResponse(
@@ -151,7 +175,7 @@ async def delete_conversation(
     session: AsyncSession = Depends(get_session)
 ):
     """删除会话及其所有消息"""
-    qa_service = QaService(session, ai_service, rag_service=rag_service)
+    qa_service = _get_qa_service(session)
     success = await qa_service.delete_conversation(conversation_id, current_user.id)
     
     if not success:

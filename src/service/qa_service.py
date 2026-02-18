@@ -1,3 +1,5 @@
+import asyncio
+import base64
 import logging
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -12,6 +14,7 @@ from src.service.ai_service import AIService
 
 if TYPE_CHECKING:
     from src.service.rag_service import RAGService
+    from src.service.agent_service import AgentService
 
 
 class QaService:
@@ -20,10 +23,12 @@ class QaService:
         session: AsyncSession,
         ai_service: AIService,
         rag_service: Optional["RAGService"] = None,
+        agent_service: Optional["AgentService"] = None,
     ):
         self.session = session
         self.ai_service = ai_service
         self.rag_service = rag_service
+        self.agent_service = agent_service
 
     async def create_conversation(self, user_id: int, conversation_data: QaConversationCreate) -> QaConversation:
         """创建新的会话"""
@@ -71,15 +76,22 @@ class QaService:
                   "role": msg.role,
                   "content": msg.content
               })
-          # 根据是否启用 RAG 选择调用方式
+          # 根据是否启用 RAG 选择调用方式；RAG 失败（如网络/SSL）时降级为纯 LLM
           use_rag = getattr(message_data, "use_rag", False) and self.rag_service
           if use_rag:
               logger.info("本次回答使用知识库 (RAG), conversation_id=%s", conversation_id)
-              ai_response = await self.rag_service.generate_response_with_rag(
-                  question=message_data.content,
-                  messages=messages_history,
-                  system_prompt_prefix="你是一个智能助手，帮助用户解答问题。请尽量基于以下参考内容回答；若参考内容未涉及，可简要说明并建议用户补充。",
-              )
+              try:
+                  ai_response = await self.rag_service.generate_response_with_rag(
+                      question=message_data.content,
+                      messages=messages_history,
+                      system_prompt_prefix="你是一个智能助手，帮助用户解答问题。请尽量基于以下参考内容回答；若参考内容未涉及，可简要说明并建议用户补充。",
+                  )
+              except Exception as e:
+                  logger.warning("知识库检索或调用失败，降级为纯 LLM: %s", e, exc_info=True)
+                  ai_response = await self.ai_service.generate_response(
+                      messages=messages_history,
+                      system_prompt="你是一个智能助手，帮助用户解答问题。",
+                  )
           else:
               logger.info("本次回答未使用知识库, conversation_id=%s (use_rag=%s, rag_service=%s)",
                          conversation_id, getattr(message_data, "use_rag", False), self.rag_service is not None)
@@ -134,10 +146,67 @@ class QaService:
             ]
 
         use_rag = getattr(message_data, "use_rag", False) and self.rag_service
+        use_image = getattr(message_data, "use_image", False)
+        image_base64 = getattr(message_data, "image_base64", None) or ""
         full_content: List[str] = []
 
         try:
-            if use_rag:
+            if self.agent_service is not None:
+                # Agent 模式：可选注入知识库/图像上下文，再跑 Agent 流式输出
+                inject_parts: List[str] = []
+                if use_rag and self.rag_service:
+                    try:
+                        retriever = self.rag_service.knowledge_service.get_retriever()
+                        docs = await asyncio.to_thread(
+                            retriever.invoke, message_data.content
+                        )
+                        context = self.rag_service._build_context_from_docs(docs)
+                        inject_parts.append("【知识库参考】\n" + context)
+                        logger.info(
+                            "Agent 上下文注入: 知识库, conversation_id=%s",
+                            conversation_id,
+                        )
+                    except Exception as e:
+                        logger.exception("知识库注入失败: %s", e)
+                        inject_parts.append("【知识库参考】检索失败，请直接回答。")
+                if use_image and image_base64 and getattr(
+                    self.agent_service, "yolo_service", None
+                ):
+                    try:
+                        image_bytes = base64.b64decode(image_base64)
+                        detections = await self.agent_service.yolo_service.detect_from_bytes(
+                            image_bytes
+                        )
+                        from src.tools.agent_tools import _format_detections
+                        img_text = _format_detections(detections)
+                        inject_parts.append(
+                            "【用户上传图片识别结果】\n" + img_text
+                        )
+                        logger.info(
+                            "Agent 上下文注入: 图像识别, conversation_id=%s",
+                            conversation_id,
+                        )
+                    except Exception as e:
+                        logger.exception("图像识别注入失败: %s", e)
+                        inject_parts.append("【用户上传图片】识别失败，请根据用户文字回答。")
+                current_user_content = message_data.content
+                if inject_parts:
+                    current_user_content = (
+                        "\n\n".join(inject_parts)
+                        + "\n\n用户问题：\n"
+                        + current_user_content
+                    )
+                logger.info(
+                    "本次流式回答使用 Agent, conversation_id=%s",
+                    conversation_id,
+                )
+                async for chunk in self.agent_service.run_agent_stream(
+                    messages_history=messages_history,
+                    current_user_content=current_user_content,
+                ):
+                    full_content.append(chunk)
+                    yield chunk
+            elif use_rag:
                 logger.info(
                     "本次流式回答使用知识库 (RAG), conversation_id=%s", conversation_id
                 )

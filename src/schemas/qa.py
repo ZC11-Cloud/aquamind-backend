@@ -7,6 +7,8 @@ class QaMessageCreate(BaseModel):
     """创建消息的请求模型"""
     content: str
     use_rag: bool = False  # 是否基于知识库检索回答（RAG）
+    use_image: bool = False  # 是否使用图像识别（需同时提供 image_base64）
+    image_base64: Optional[str] = None  # 可选，base64 编码的图片，与 use_image 配合
 
 
 class QaMessageResponse(BaseModel):
