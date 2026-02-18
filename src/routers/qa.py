@@ -106,6 +106,14 @@ async def send_message_stream(
     session: AsyncSession = Depends(get_session),
 ):
     """流式发送消息到会话，返回 SSE 流；支持 use_rag/use_image/image_base64，Agent 自动或按开关调用工具。"""
+    # 调试：请求体中的开关与图片
+    logger.info(
+        "[DEBUG] stream 请求体: use_rag=%s, use_image=%s, image_base64 有值=%s, content_len=%d",
+        getattr(message_data, "use_rag", None),
+        getattr(message_data, "use_image", None),
+        bool(getattr(message_data, "image_base64", None)),
+        len(getattr(message_data, "content", "") or ""),
+    )
     qa_service = _get_qa_service(session)
 
     async def event_stream():

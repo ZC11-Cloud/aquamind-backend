@@ -150,6 +150,14 @@ class QaService:
         image_base64 = getattr(message_data, "image_base64", None) or ""
         full_content: List[str] = []
 
+        # 调试：流式分支与图像识别条件
+        has_agent = self.agent_service is not None
+        has_yolo = bool(getattr(self.agent_service, "yolo_service", None) if self.agent_service else False)
+        logger.info(
+            "[DEBUG] send_message_stream: use_rag=%s, use_image=%s, image_base64_len=%s, agent_service=%s, yolo_service=%s",
+            use_rag, use_image, len(image_base64) if image_base64 else 0, has_agent, has_yolo,
+        )
+
         try:
             if self.agent_service is not None:
                 # Agent 模式：可选注入知识库/图像上下文，再跑 Agent 流式输出
@@ -169,11 +177,17 @@ class QaService:
                     except Exception as e:
                         logger.exception("知识库注入失败: %s", e)
                         inject_parts.append("【知识库参考】检索失败，请直接回答。")
-                if use_image and image_base64 and getattr(
-                    self.agent_service, "yolo_service", None
-                ):
+                # 图像识别注入：需同时满足 use_image、有 image_base64、yolo_service 已配置
+                yolo_svc = getattr(self.agent_service, "yolo_service", None)
+                if use_image and image_base64 and yolo_svc:
                     try:
-                        image_bytes = base64.b64decode(image_base64)
+                        logger.info("[DEBUG] 开始调用图像识别, image_base64 长度=%d", len(image_base64))
+                        # 规范化 base64：去除空白，补足填充（长度需为 4 的倍数）
+                        b64_clean = (image_base64 or "").replace("\n", "").replace("\r", "").strip()
+                        pad = (4 - len(b64_clean) % 4) % 4
+                        if pad != 4:
+                            b64_clean += "=" * pad
+                        image_bytes = base64.b64decode(b64_clean, validate=False)
                         detections = await self.agent_service.yolo_service.detect_from_bytes(
                             image_bytes
                         )
@@ -183,12 +197,17 @@ class QaService:
                             "【用户上传图片识别结果】\n" + img_text
                         )
                         logger.info(
-                            "Agent 上下文注入: 图像识别, conversation_id=%s",
-                            conversation_id,
+                            "Agent 上下文注入: 图像识别, conversation_id=%s, 检测数=%d",
+                            conversation_id, len(detections),
                         )
                     except Exception as e:
                         logger.exception("图像识别注入失败: %s", e)
                         inject_parts.append("【用户上传图片】识别失败，请根据用户文字回答。")
+                else:
+                    logger.info(
+                        "[DEBUG] 未调用图像识别: use_image=%s, image_base64 有值=%s, yolo_service=%s",
+                        use_image, bool(image_base64), yolo_svc is not None,
+                    )
                 current_user_content = message_data.content
                 if inject_parts:
                     current_user_content = (
@@ -229,13 +248,21 @@ class QaService:
                     full_content.append(chunk)
                     yield chunk
         finally:
-            async with self.session.begin():
-                assistant_message = QaMessage(
-                    conversation_id=conversation_id,
-                    role="assistant",
-                    content="".join(full_content),
+            content_text = "".join(full_content)
+            # 仅在生成了内容时落库，避免因 DashScope 等异常导致保存空回复
+            if content_text.strip():
+                async with self.session.begin():
+                    assistant_message = QaMessage(
+                        conversation_id=conversation_id,
+                        role="assistant",
+                        content=content_text,
+                    )
+                    self.session.add(assistant_message)
+            else:
+                logger.warning(
+                    "流式回复内容为空，未写入 assistant 消息，conversation_id=%s（可能因网络/API 异常中断）",
+                    conversation_id,
                 )
-                self.session.add(assistant_message)
 
     async def get_conversations(self, user_id: int, skip: int = 0, limit: int = 10) -> tuple[List[QaConversation], int]:
         async with self.session.begin():

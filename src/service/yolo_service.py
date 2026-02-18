@@ -1,13 +1,14 @@
 """
 YOLOv8 图像检测服务：加载 .pt 权重并对上传图片进行目标检测。
 推理在线程池中执行，避免阻塞 FastAPI 事件循环。
+支持从文件路径或内存字节（numpy 数组）推理，避免临时文件读取失败。
 """
 import asyncio
 import logging
-import os
-import tempfile
 from pathlib import Path
 from typing import List, Optional
+
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +41,11 @@ def _run_inference(image_path: str, weights_path: str) -> List[dict]:
     """
     model = _get_model(weights_path)
     results = model(image_path, verbose=False)
+    return _results_to_detections(results)
+
+
+def _results_to_detections(results) -> List[dict]:
+    """从 YOLO results 提取 detections 列表。"""
     detections = []
     if not results:
         return detections
@@ -65,6 +71,21 @@ def _run_inference(image_path: str, weights_path: str) -> List[dict]:
     return detections
 
 
+def _run_inference_from_bytes(image_bytes: bytes, weights_path: str) -> List[dict]:
+    """
+    从内存中的图片字节推理，避免写临时文件导致的 Image Read Error。
+    使用 cv2.imdecode 解码，支持 JPEG/PNG 等常见格式。
+    """
+    import cv2
+    arr = np.frombuffer(image_bytes, dtype=np.uint8)
+    im = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+    if im is None:
+        raise ValueError("无法从字节解码为图像，请确认为有效的 JPEG/PNG 等格式")
+    model = _get_model(weights_path)
+    results = model(im, verbose=False)
+    return _results_to_detections(results)
+
+
 class YOLODetectionService:
     """YOLOv8 检测服务：异步接口，内部用线程池跑推理。"""
 
@@ -73,18 +94,11 @@ class YOLODetectionService:
 
     async def detect_from_bytes(self, image_bytes: bytes) -> List[dict]:
         """
-        对图片字节数据进行检测。会先写入临时文件再调用 YOLO（因 ultralytics 支持 path/ndarray）。
+        对图片字节数据进行检测。优先从内存解码（cv2.imdecode），避免临时文件读取失败。
         """
-        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as f:
-            f.write(image_bytes)
-            temp_path = f.name
-        try:
-            return await asyncio.to_thread(_run_inference, temp_path, self.weights_path)
-        finally:
-            try:
-                os.unlink(temp_path)
-            except OSError:
-                pass
+        return await asyncio.to_thread(
+            _run_inference_from_bytes, image_bytes, self.weights_path
+        )
 
     async def detect_from_path(self, image_path: str) -> List[dict]:
         """对本地图片路径进行检测。"""
