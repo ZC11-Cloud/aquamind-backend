@@ -1,5 +1,5 @@
 """图像检测接口的请求/响应模型"""
-from typing import List
+from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -10,6 +10,8 @@ class DetectionItem(BaseModel):
     class_id: int = Field(..., description="类别 ID")
     confidence: float = Field(..., ge=0, le=1, description="置信度 0~1")
     bbox: List[float] = Field(..., description="边界框 [x1, y1, x2, y2]")
+    species_name_zh: Optional[str] = Field(None, description="中文物种名称（LLM 增强）")
+    description: Optional[str] = Field(None, description="简短描述（LLM 增强）")
 
 
 class DetectionResponse(BaseModel):
