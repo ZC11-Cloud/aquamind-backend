@@ -144,9 +144,11 @@ class AgentService:
         if not isinstance(final_content, str):
             final_content = str(final_content)
 
-        # 流式输出：逐字符或整段返回（此处整段 yield 以保持与现有 SSE 兼容，后续可改为逐 token）
+        # 将最终回复按固定长度拆分为多个 chunk，逐块 yield，提升前端感知到的流式体验
         if final_content:
-            yield final_content
+            chunk_size = 50
+            for i in range(0, len(final_content), chunk_size):
+                yield final_content[i : i + chunk_size]
 
 
 def create_agent_service(

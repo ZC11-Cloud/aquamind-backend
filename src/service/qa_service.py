@@ -159,7 +159,9 @@ class QaService:
         )
 
         try:
-            if self.agent_service is not None:
+            # 仅在需要知识库或图像识别时才走 Agent 编排，其余场景走纯 LLM 流式回复，保证默认问答有真实流式体验
+            use_agent = self.agent_service is not None and (use_rag or use_image)
+            if use_agent:
                 # Agent 模式：可选注入知识库/图像上下文，再跑 Agent 流式输出
                 inject_parts: List[str] = []
                 if use_rag and self.rag_service:
@@ -234,8 +236,13 @@ class QaService:
                     messages=messages_history,
                     system_prompt_prefix="你是一个智能助手，帮助用户解答问题。请尽量基于以下参考内容回答；若参考内容未涉及，可简要说明并建议用户补充。",
                 )
-                full_content = [ai_response]
-                yield ai_response
+                # RAG 目前底层为非流式，这里按固定长度拆分为多个 chunk 提供前端流式体验
+                full_content = []
+                chunk_size = 50
+                for i in range(0, len(ai_response), chunk_size):
+                    chunk = ai_response[i : i + chunk_size]
+                    full_content.append(chunk)
+                    yield chunk
             else:
                 logger.info(
                     "本次流式回答未使用知识库, conversation_id=%s",
