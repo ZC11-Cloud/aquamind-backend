@@ -7,10 +7,12 @@ from sqlalchemy import func, delete, update
 from typing import List, Optional, TYPE_CHECKING, AsyncGenerator
 
 from src.models.qa import QaConversation, QaMessage
-
-logger = logging.getLogger(__name__)
 from src.schemas.qa import QaConversationCreate, QaMessageCreate
 from src.service.ai_service import AIService
+from src.settings import UPLOAD_DIR
+from src.utils.qa_image import save_qa_image_base64_to_file
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from src.service.rag_service import RAGService
@@ -54,11 +56,17 @@ class QaService:
           if not conversation:
               return None
 
+          # 若有图片则保存到本地文件，库中只存 URL（后期可改为 OSS）
+          image_url = None
+          b64 = getattr(message_data, "image_base64", None) or None
+          if b64:
+              image_url = save_qa_image_base64_to_file(b64, UPLOAD_DIR)
           # 创建用户消息
           user_message = QaMessage(
               conversation_id=conversation_id,
               role="user",
-              content=message_data.content
+              content=message_data.content,
+              image_url=image_url,
           )
           self.session.add(user_message)
 
@@ -128,10 +136,15 @@ class QaService:
             if not conversation:
                 raise ValueError("会话不存在或不属于该用户")
 
+            image_url = None
+            b64 = getattr(message_data, "image_base64", None) or None
+            if b64:
+                image_url = save_qa_image_base64_to_file(b64, UPLOAD_DIR)
             user_message = QaMessage(
                 conversation_id=conversation_id,
                 role="user",
                 content=message_data.content,
+                image_url=image_url,
             )
             self.session.add(user_message)
             await self.session.flush()
