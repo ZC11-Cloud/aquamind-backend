@@ -52,3 +52,8 @@ class QaMessageListResponse(BaseModel):
     """消息列表响应模型"""
     messages: List[QaMessageResponse]
     total: int
+
+
+class QaConversationTitleResponse(BaseModel):
+    """生成标题响应模型"""
+    title: str

@@ -83,6 +83,23 @@ class AIService:
             if isinstance(content, str) and content:
                 yield content
 
+    async def generate_short_title(self, user_question: str) -> str:
+        """
+        根据用户问题生成一句简短的中文对话标题。
+
+        Args:
+            user_question: 用户的首条问题内容
+
+        Returns:
+            生成的标题，不超过 15 个字
+        """
+        system_prompt = (
+            "根据用户问题生成一句简短的中文对话标题，不超过 15 个字，不要引号、不要标点结尾。"
+        )
+        messages = [{"role": "user", "content": user_question}]
+        result = await self.generate_response(messages, system_prompt)
+        return (result or "").strip()[:255]
+
 
 # 工厂函数，用于创建AIService实例
 def create_ai_service(api_key: str, model_name: str = "qwen-plus") -> AIService:

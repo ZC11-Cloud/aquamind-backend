@@ -14,6 +14,7 @@ from src.schemas.qa import (
     QaConversationCreate,
     QaConversationResponse,
     QaConversationListResponse,
+    QaConversationTitleResponse,
     QaMessageCreate,
     QaMessageResponse,
     QaMessageListResponse
@@ -175,6 +176,27 @@ async def get_messages(
         messages=[QaMessageResponse.model_validate(m) for m in messages],
         total=total
     )
+
+
+@router.post(
+    "/conversations/{conversation_id}/generate-title",
+    response_model=QaConversationTitleResponse,
+)
+async def generate_conversation_title(
+    conversation_id: int,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """根据首轮对话内容生成并更新会话标题，仅当消息数为 2 且标题为「新对话」时执行。"""
+    qa_service = _get_qa_service(session)
+    title = await qa_service.generate_conversation_title(conversation_id, current_user.id)
+    if title is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="不满足生成条件（会话不存在、消息数非 2、或标题已非「新对话」）",
+        )
+    return QaConversationTitleResponse(title=title)
+
 
 @router.delete("/conversations/{conversation_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_conversation(

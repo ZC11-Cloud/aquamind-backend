@@ -3,7 +3,7 @@ import base64
 import logging
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy import func, delete
+from sqlalchemy import func, delete, update
 from typing import List, Optional, TYPE_CHECKING, AsyncGenerator
 
 from src.models.qa import QaConversation, QaMessage
@@ -345,3 +345,76 @@ class QaService:
           # 删除会话
           await self.session.delete(conversation)
           return True
+
+    async def update_conversation_title(
+        self, conversation_id: int, user_id: int, title: str
+    ) -> bool:
+        """更新会话标题，校验归属后更新。"""
+        async with self.session.begin():
+            stmt = (
+                update(QaConversation)
+                .where(
+                    QaConversation.id == conversation_id,
+                    QaConversation.user_id == user_id,
+                )
+                .values(title=(title or "")[:255])
+            )
+            result = await self.session.execute(stmt)
+            return result.rowcount > 0
+
+    async def generate_conversation_title(
+        self, conversation_id: int, user_id: int
+    ) -> Optional[str]:
+        """
+        在第一次对话完成后，根据首条用户问题生成标题并更新。
+        仅当消息数为 2 且当前标题为「新对话」时执行。
+        """
+        async with self.session.begin():
+            conversation_stmt = select(QaConversation).where(
+                QaConversation.id == conversation_id,
+                QaConversation.user_id == user_id,
+            )
+            conv_result = await self.session.execute(conversation_stmt)
+            conversation = conv_result.scalar_one_or_none()
+            if not conversation:
+                return None
+
+            if (conversation.title or "").strip() != "新对话":
+                return conversation.title
+
+            count_stmt = select(func.count(QaMessage.id)).where(
+                QaMessage.conversation_id == conversation_id
+            )
+            count_result = await self.session.execute(count_stmt)
+            total = count_result.scalar_one()
+            if total != 2:
+                return None
+
+            first_user_stmt = (
+                select(QaMessage)
+                .where(
+                    QaMessage.conversation_id == conversation_id,
+                    QaMessage.role == "user",
+                )
+                .order_by(QaMessage.create_time.asc())
+                .limit(1)
+            )
+            msg_result = await self.session.execute(first_user_stmt)
+            first_user_msg = msg_result.scalar_one_or_none()
+            if not first_user_msg or not (first_user_msg.content or "").strip():
+                return None
+            user_question = (first_user_msg.content or "").strip()
+
+        try:
+            generated = await self.ai_service.generate_short_title(user_question)
+        except Exception as e:
+            logger.warning("生成对话标题失败: %s", e, exc_info=True)
+            return None
+
+        if not generated:
+            return None
+
+        success = await self.update_conversation_title(
+            conversation_id, user_id, generated
+        )
+        return generated if success else None
