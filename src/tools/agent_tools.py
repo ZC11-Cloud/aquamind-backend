@@ -66,8 +66,15 @@ def create_agent_tools(knowledge_service, yolo_service):
         """当用户上传了水生生物图片、需要识别物种或图中目标时使用。输入为 base64 编码的图片数据。"""
         if yolo_service is None:
             return "图像识别服务未配置，无法识别图片。"
+        # 与 qa_service 一致：规范化 base64（去空白、补足 padding，长度需为 4 的倍数）
+        b64_clean = (image_base64 or "").replace("\n", "").replace("\r", "").strip()
+        if not b64_clean:
+            return "未提供有效的 base64 图片数据，无法识别。"
+        pad = (4 - len(b64_clean) % 4) % 4
+        if pad != 4:
+            b64_clean += "=" * pad
         try:
-            image_bytes = base64.b64decode(image_base64)
+            image_bytes = base64.b64decode(b64_clean, validate=False)
         except Exception as e:
             return f"图片解码失败: {e}"
         try:
