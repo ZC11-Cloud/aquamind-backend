@@ -9,6 +9,7 @@ from typing import AsyncGenerator, List, Dict, Any, Optional
 from langchain_core.messages import (
     HumanMessage,
     AIMessage,
+    AIMessageChunk,
     SystemMessage,
     ToolMessage,
     BaseMessage,
@@ -102,19 +103,38 @@ class AgentService:
         langchain_messages.append(HumanMessage(content=current_user_content))
 
         model = self._model_with_tools()
-        response: Optional[AIMessage] = None
+        response: Optional[BaseMessage] = None
         max_iterations = 10
         iteration = 0
 
         while iteration < max_iterations:
             iteration += 1
-            response = await model.ainvoke(langchain_messages)
+            accumulated: Optional[AIMessageChunk] = None
+
+            async for chunk in model.astream(langchain_messages):
+                if not isinstance(chunk, AIMessageChunk):
+                    continue
+                # 真流式：有文本内容就立即 yield
+                content = chunk.content
+                if content is not None:
+                    if isinstance(content, list):
+                        content = "".join(
+                            (c.get("text", "") if isinstance(c, dict) else str(c) for c in content)
+                        )
+                    if isinstance(content, str) and content:
+                        yield content
+                accumulated = chunk if accumulated is None else accumulated + chunk
+
+            response = accumulated
+            if response is None:
+                break
 
             tool_calls = getattr(response, "tool_calls", None) or []
             if not tool_calls:
                 break
 
             logger.info("Agent 第 %d 轮: %d 个 tool_calls", iteration, len(tool_calls))
+            # 合并后的 chunk 可直接 append（AIMessageChunk 是 BaseMessage 子类）
             langchain_messages.append(response)
 
             for tc in tool_calls:
@@ -135,20 +155,6 @@ class AgentService:
         if response is None:
             yield "抱歉，未能生成回复。"
             return
-
-        final_content = response.content
-        if isinstance(final_content, list):
-            final_content = "".join(
-                (c.get("text", "") if isinstance(c, dict) else str(c) for c in final_content)
-            )
-        if not isinstance(final_content, str):
-            final_content = str(final_content)
-
-        # 将最终回复按固定长度拆分为多个 chunk，逐块 yield，提升前端感知到的流式体验
-        if final_content:
-            chunk_size = 50
-            for i in range(0, len(final_content), chunk_size):
-                yield final_content[i : i + chunk_size]
 
 
 def create_agent_service(
