@@ -3,7 +3,8 @@ from langchain_openai import ChatOpenAI
 from langchain_community.chat_models.tongyi import ChatTongyi
 from langchain.messages import HumanMessage, AIMessage, SystemMessage
 from pydantic import SecretStr
-
+import logging
+logger = logging.getLogger(__name__)
 class AIService:
     def __init__(self, api_key: str, model_name: str = "qwen-plus"):
         """
@@ -22,6 +23,7 @@ class AIService:
         """
         name = (model_name or self.default_model_name) or "qwen-plus"
         # 这里直接按需创建实例，模型数量有限，性能影响可接受
+        logger.info(f"Getting model: {name}")
         return ChatTongyi(model=name, api_key=self.api_key)  # type: ignore
 
     async def generate_response(
