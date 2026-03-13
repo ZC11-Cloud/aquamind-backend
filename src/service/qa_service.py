@@ -85,6 +85,7 @@ class QaService:
                   "content": msg.content
               })
           # 根据是否启用 RAG 选择调用方式；RAG 失败（如网络/SSL）时降级为纯 LLM
+          model_name = getattr(message_data, "model_name", None)
           use_rag = getattr(message_data, "use_rag", False) and self.rag_service
           if use_rag:
               logger.info("本次回答使用知识库 (RAG), conversation_id=%s", conversation_id)
@@ -105,7 +106,8 @@ class QaService:
                          conversation_id, getattr(message_data, "use_rag", False), self.rag_service is not None)
               ai_response = await self.ai_service.generate_response(
                   messages=messages_history,
-                  system_prompt="你是一个智能助手，帮助用户解答问题。"
+                  system_prompt="你是一个智能助手，帮助用户解答问题。",
+                  model_name=model_name,
               )
           assistant_message = QaMessage(
               conversation_id=conversation_id,
@@ -161,6 +163,7 @@ class QaService:
         use_rag = getattr(message_data, "use_rag", False) and self.rag_service
         use_image = getattr(message_data, "use_image", False)
         image_base64 = getattr(message_data, "image_base64", None) or ""
+        model_name = getattr(message_data, "model_name", None)
         full_content: List[str] = []
 
         # 调试：流式分支与图像识别条件
@@ -264,6 +267,7 @@ class QaService:
                 async for chunk in self.ai_service.generate_response_stream(
                     messages=messages_history,
                     system_prompt="你是一个智能助手，帮助用户解答问题。",
+                    model_name=model_name,
                 ):
                     full_content.append(chunk)
                     yield chunk

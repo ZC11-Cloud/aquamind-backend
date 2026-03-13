@@ -8,14 +8,28 @@ class AIService:
     def __init__(self, api_key: str, model_name: str = "qwen-plus"):
         """
         初始化AI服务
-        
+
         Args:
             api_key: DashScope API密钥
-            model_name: 使用的模型名称
+            model_name: 默认使用的模型名称
         """
-        self.chat_model = ChatTongyi(model=model_name, api_key=api_key) # type: ignore
+        self.api_key = api_key
+        self.default_model_name = model_name
 
-    async def generate_response(self, messages: List[Dict[str, str]], system_prompt: str = "your are a helpful assistant") -> str:
+    def _get_model(self, model_name: str | None = None) -> ChatTongyi:
+        """
+        根据传入的模型名获取 ChatTongyi 实例；未传或非法时回退到默认模型。
+        """
+        name = (model_name or self.default_model_name) or "qwen-plus"
+        # 这里直接按需创建实例，模型数量有限，性能影响可接受
+        return ChatTongyi(model=name, api_key=self.api_key)  # type: ignore
+
+    async def generate_response(
+        self,
+        messages: List[Dict[str, str]],
+        system_prompt: str = "your are a helpful assistant",
+        model_name: str | None = None,
+    ) -> str:
         """
         生成AI回复
         
@@ -28,21 +42,22 @@ class AIService:
         """
         # 构建消息列表
         langchain_messages = []
-        
+
         # 添加系统提示词
         if system_prompt:
             langchain_messages.append(SystemMessage(content=system_prompt))
-        
+
         # 转换消息历史记录
         for msg in messages:
             if msg["role"] == "user":
                 langchain_messages.append(HumanMessage(content=msg["content"]))
             elif msg["role"] == "assistant":
                 langchain_messages.append(AIMessage(content=msg["content"]))
-        
-        # 调用AI生成回复
-        response = self.chat_model.invoke(langchain_messages)
-        
+
+        # 调用AI生成回复（保持同步调用以尽量兼容现有行为）
+        model = self._get_model(model_name)
+        response = model.invoke(langchain_messages)
+
         content = response.content
         if isinstance(content, list):
             content = str(content)
@@ -52,6 +67,7 @@ class AIService:
         self,
         messages: List[Dict[str, str]],
         system_prompt: str = "your are a helpful assistant",
+        model_name: str | None = None,
     ) -> AsyncGenerator[str, None]:
         """
         流式生成AI回复，按 token/chunk 逐步 yield 内容。
@@ -74,7 +90,8 @@ class AIService:
             elif msg["role"] == "assistant":
                 langchain_messages.append(AIMessage(content=msg["content"]))
 
-        async for chunk in self.chat_model.astream(langchain_messages):
+        model = self._get_model(model_name)
+        async for chunk in model.astream(langchain_messages):
             content = chunk.content
             if content is None:
                 continue
