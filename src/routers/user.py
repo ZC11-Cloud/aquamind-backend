@@ -66,14 +66,15 @@ async def login(
 
 @router.get("/me", response_model=ResponseSchema)
 async def read_users_me(
-        current_user: UserInfo = Depends(get_current_user)
+        current_user: User = Depends(get_current_user)
 ):
     """获取当前登录用户信息"""
+    user_info = UserInfo.model_validate(current_user)
     return ResponseSchema(
         result="success",
         code=200,
         message="User info retrieved success",
-        data=current_user.model_dump(),
+        data=user_info.model_dump(),
     )
 
 
