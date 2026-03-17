@@ -64,12 +64,17 @@ async def login(
     )
     return Token(access_token=access_token, token_type="bearer")
 
-@router.get("/me", response_model=UserInfo)
+@router.get("/me", response_model=ResponseSchema)
 async def read_users_me(
         current_user: UserInfo = Depends(get_current_user)
 ):
     """获取当前登录用户信息"""
-    return current_user
+    return ResponseSchema(
+        result="success",
+        code=200,
+        message="User info retrieved success",
+        data=current_user.model_dump(),
+    )
 
 
 @router.post("/password", response_model=ResponseSchema)
