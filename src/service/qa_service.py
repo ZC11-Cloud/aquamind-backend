@@ -4,11 +4,13 @@ import logging
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy import func, delete, update
-from typing import List, Optional, TYPE_CHECKING, AsyncGenerator
+from typing import List, Optional, TYPE_CHECKING, AsyncGenerator, Dict, Any
 
 from src.models.qa import QaConversation, QaMessage
+from src.models.document import KnowledgeDocument
 from src.schemas.qa import QaConversationCreate, QaMessageCreate
 from src.service.ai_service import AIService
+from src.service.rag_service import build_citations_from_docs, CITATION_FORMAT_INSTRUCTION
 from src.settings import UPLOAD_DIR
 from src.utils.qa_image import save_qa_image_base64_to_file
 
@@ -17,6 +19,24 @@ logger = logging.getLogger(__name__)
 if TYPE_CHECKING:
     from src.service.rag_service import RAGService
     from src.service.agent_service import AgentService
+
+
+async def _enrich_citations_with_filename(
+    session: AsyncSession, citations: List[Dict[str, Any]]
+) -> List[Dict[str, Any]]:
+    """从 KnowledgeDocument 查询 original_filename，填充 citations 的 filename 字段。"""
+    if not citations:
+        return citations
+    source_ids = list({c["source_id"] for c in citations})
+    result = await session.execute(
+        select(KnowledgeDocument.source_id, KnowledgeDocument.original_filename).where(
+            KnowledgeDocument.source_id.in_(source_ids)
+        )
+    )
+    filename_map = {row.source_id: row.original_filename for row in result.all()}
+    for c in citations:
+        c["filename"] = filename_map.get(c["source_id"], c.get("filename", c["source_id"]))
+    return citations
 
 
 class QaService:
@@ -87,20 +107,23 @@ class QaService:
           # 根据是否启用 RAG 选择调用方式；RAG 失败（如网络/SSL）时降级为纯 LLM
           model_name = getattr(message_data, "model_name", None)
           use_rag = getattr(message_data, "use_rag", False) and self.rag_service
+          citations: List[Dict[str, Any]] = []
           if use_rag:
               logger.info("本次回答使用知识库 (RAG), conversation_id=%s", conversation_id)
               try:
-                  ai_response = await self.rag_service.generate_response_with_rag(
+                  ai_response, citations = await self.rag_service.generate_response_with_rag(
                       question=message_data.content,
                       messages=messages_history,
                       system_prompt_prefix="你是一个智能助手，帮助用户解答问题。请尽量基于以下参考内容回答；若参考内容未涉及，可简要说明并建议用户补充。",
                   )
+                  citations = await _enrich_citations_with_filename(self.session, citations)
               except Exception as e:
                   logger.warning("知识库检索或调用失败，降级为纯 LLM: %s", e, exc_info=True)
                   ai_response = await self.ai_service.generate_response(
                       messages=messages_history,
                       system_prompt="你是一个智能助手，帮助用户解答问题。",
                   )
+                  citations = []
           else:
               logger.info("本次回答未使用知识库, conversation_id=%s (use_rag=%s, rag_service=%s)",
                          conversation_id, getattr(message_data, "use_rag", False), self.rag_service is not None)
@@ -112,7 +135,8 @@ class QaService:
           assistant_message = QaMessage(
               conversation_id=conversation_id,
               role="assistant",
-              content=ai_response
+              content=ai_response,
+              citations=citations if citations else None,
           )
           self.session.add(assistant_message)
 
@@ -165,6 +189,7 @@ class QaService:
         image_base64 = getattr(message_data, "image_base64", None) or ""
         model_name = getattr(message_data, "model_name", None)
         full_content: List[str] = []
+        stream_citations: List[Dict[str, Any]] = []
 
         # 调试：流式分支与图像识别条件
         has_agent = self.agent_service is not None
@@ -186,8 +211,11 @@ class QaService:
                         docs = await asyncio.to_thread(
                             retriever.invoke, message_data.content
                         )
-                        context = self.rag_service._build_context_from_docs(docs)
-                        inject_parts.append("【知识库参考】\n" + context)
+                        context, stream_citations = self.rag_service.build_context_and_citations(docs)
+                        stream_citations = await _enrich_citations_with_filename(self.session, stream_citations)
+                        inject_parts.append(
+                            f"【重要】{CITATION_FORMAT_INSTRUCTION}\n\n【知识库参考】\n{context}"
+                        )
                         logger.info(
                             "Agent 上下文注入: 知识库, conversation_id=%s",
                             conversation_id,
@@ -195,6 +223,7 @@ class QaService:
                     except Exception as e:
                         logger.exception("知识库注入失败: %s", e)
                         inject_parts.append("【知识库参考】检索失败，请直接回答。")
+                        stream_citations = []
                 # 图像识别注入：需同时满足 use_image、有 image_base64、yolo_service 已配置
                 yolo_svc = getattr(self.agent_service, "yolo_service", None)
                 if use_image and image_base64 and yolo_svc:
@@ -247,11 +276,12 @@ class QaService:
                 logger.info(
                     "本次流式回答使用知识库 (RAG), conversation_id=%s", conversation_id
                 )
-                ai_response = await self.rag_service.generate_response_with_rag(
+                ai_response, stream_citations = await self.rag_service.generate_response_with_rag(
                     question=message_data.content,
                     messages=messages_history,
                     system_prompt_prefix="你是一个智能助手，帮助用户解答问题。请尽量基于以下参考内容回答；若参考内容未涉及，可简要说明并建议用户补充。",
                 )
+                stream_citations = await _enrich_citations_with_filename(self.session, stream_citations)
                 # RAG 目前底层为非流式，这里按固定长度拆分为多个 chunk 提供前端流式体验
                 full_content = []
                 chunk_size = 50
@@ -275,18 +305,21 @@ class QaService:
             content_text = "".join(full_content)
             # 仅在生成了内容时落库，避免因 DashScope 等异常导致保存空回复
             if content_text.strip():
-                async with self.session.begin():
-                    assistant_message = QaMessage(
-                        conversation_id=conversation_id,
-                        role="assistant",
-                        content=content_text,
-                    )
-                    self.session.add(assistant_message)
+                assistant_message = QaMessage(
+                    conversation_id=conversation_id,
+                    role="assistant",
+                    content=content_text,
+                    citations=stream_citations if stream_citations else None,
+                )
+                self.session.add(assistant_message)
+                await self.session.commit()
             else:
                 logger.warning(
                     "流式回复内容为空，未写入 assistant 消息，conversation_id=%s（可能因网络/API 异常中断）",
                     conversation_id,
                 )
+            # 流式协议：最后 yield done 事件，携带 citations 供前端 Sources 使用
+            yield {"type": "done", "citations": stream_citations}
 
     async def get_conversations(self, user_id: int, skip: int = 0, limit: int = 10) -> tuple[List[QaConversation], int]:
         async with self.session.begin():

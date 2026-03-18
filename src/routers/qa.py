@@ -95,7 +95,9 @@ async def send_message(
         conversation_id=message.conversation_id,
         role=message.role,
         content=message.content,
-        create_time=message.create_time
+        image_url=message.image_url,
+        citations=message.citations,
+        create_time=message.create_time,
     )
 
 
@@ -122,9 +124,11 @@ async def send_message_stream(
             async for chunk in qa_service.send_message_stream(
                 conversation_id, current_user.id, message_data
             ):
-                payload = json.dumps({"type": "chunk", "content": chunk}, ensure_ascii=False)
+                if isinstance(chunk, dict):
+                    payload = json.dumps(chunk, ensure_ascii=False)
+                else:
+                    payload = json.dumps({"type": "chunk", "content": chunk}, ensure_ascii=False)
                 yield f"data: {payload}\n\n"
-            yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
         except ValueError as e:
             yield f"data: {json.dumps({'type': 'error', 'detail': str(e)}, ensure_ascii=False)}\n\n"
         except Exception as e:

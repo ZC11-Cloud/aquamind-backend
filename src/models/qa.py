@@ -1,8 +1,9 @@
-from sqlalchemy import Integer, String, DateTime, Enum, text, func, Text
+from sqlalchemy import Integer, String, DateTime, Enum, text, func, Text, JSON
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.models import Base
 from datetime import datetime
+
 
 class QaConversation(Base):
     __tablename__ = 'qa_conversations'
@@ -21,4 +22,5 @@ class QaMessage(Base):
     role: Mapped[str] = mapped_column(Enum('user', 'assistant'), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     image_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    citations: Mapped[list | None] = mapped_column(JSON, nullable=True, default=None)
     create_time: Mapped[datetime] = mapped_column(DateTime, server_default=text('CURRENT_TIMESTAMP'))

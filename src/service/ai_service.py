@@ -17,6 +17,11 @@ class AIService:
         self.api_key = api_key
         self.default_model_name = model_name
 
+    @property
+    def chat_model(self) -> ChatTongyi:
+        """返回用于 Agent 的 ChatTongyi 实例，支持 bind_tools 与 astream。"""
+        return self._get_model()
+
     def _get_model(self, model_name: str | None = None) -> ChatTongyi:
         """
         根据传入的模型名获取 ChatTongyi 实例；未传或非法时回退到默认模型。

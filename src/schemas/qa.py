@@ -3,6 +3,14 @@ from typing import List, Optional
 from pydantic import BaseModel
 
 
+class KnowledgeCitation(BaseModel):
+    """知识库引用，供前端 Sources 组件溯源。"""
+    key: int
+    source_id: str
+    filename: str
+    snippet: str
+
+
 class QaMessageCreate(BaseModel):
     """创建消息的请求模型"""
     content: str
@@ -20,6 +28,7 @@ class QaMessageResponse(BaseModel):
     role: str
     content: str
     image_url: Optional[str] = None
+    citations: Optional[List[KnowledgeCitation]] = None
     create_time: datetime
 
     class Config:
