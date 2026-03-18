@@ -10,7 +10,12 @@ from src.models.qa import QaConversation, QaMessage
 from src.models.document import KnowledgeDocument
 from src.schemas.qa import QaConversationCreate, QaMessageCreate
 from src.service.ai_service import AIService
-from src.service.rag_service import build_citations_from_docs, CITATION_FORMAT_INSTRUCTION
+from src.service.rag_service import (
+    build_citations_from_docs,
+    CITATION_FORMAT_INSTRUCTION,
+    filter_citations_by_referenced,
+    normalize_citation_format,
+)
 from src.settings import UPLOAD_DIR
 from src.utils.qa_image import save_qa_image_base64_to_file
 
@@ -116,6 +121,8 @@ class QaService:
                       messages=messages_history,
                       system_prompt_prefix="你是一个智能助手，帮助用户解答问题。请尽量基于以下参考内容回答；若参考内容未涉及，可简要说明并建议用户补充。",
                   )
+                  ai_response = normalize_citation_format(ai_response)
+                  citations = filter_citations_by_referenced(ai_response, citations)
                   citations = await _enrich_citations_with_filename(self.session, citations)
               except Exception as e:
                   logger.warning("知识库检索或调用失败，降级为纯 LLM: %s", e, exc_info=True)
@@ -281,6 +288,8 @@ class QaService:
                     messages=messages_history,
                     system_prompt_prefix="你是一个智能助手，帮助用户解答问题。请尽量基于以下参考内容回答；若参考内容未涉及，可简要说明并建议用户补充。",
                 )
+                ai_response = normalize_citation_format(ai_response)
+                stream_citations = filter_citations_by_referenced(ai_response, stream_citations)
                 stream_citations = await _enrich_citations_with_filename(self.session, stream_citations)
                 # RAG 目前底层为非流式，这里按固定长度拆分为多个 chunk 提供前端流式体验
                 full_content = []
@@ -303,6 +312,9 @@ class QaService:
                     yield chunk
         finally:
             content_text = "".join(full_content)
+            content_text = normalize_citation_format(content_text)
+            # 只保留回复中实际引用的 citations（<sup>N</sup>）
+            stream_citations = filter_citations_by_referenced(content_text, stream_citations)
             # 仅在生成了内容时落库，避免因 DashScope 等异常导致保存空回复
             if content_text.strip():
                 assistant_message = QaMessage(

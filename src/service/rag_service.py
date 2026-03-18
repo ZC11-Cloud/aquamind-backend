@@ -3,6 +3,7 @@ RAG 服务：基于知识库检索 + 拼装 prompt，调用现有 AIService 生�
 支持构建 citations 供前端 Sources 组件溯源。
 """
 import asyncio
+import re
 import logging
 from typing import List, Dict, Optional, Tuple, Any
 
@@ -19,10 +20,11 @@ NO_CONTEXT_NOTICE = "（当前知识库中暂无与问题直接相关的参考�
 DEFAULT_RAG_SYSTEM_PREFIX = "你是一个智能助手，帮助用户解答问题。请尽量基于以下参考内容回答；若参考内容未涉及，可简要说明并建议用户补充。"
 
 # 引用格式说明（要求 LLM 使用 <sup>N</sup> 格式）
-CITATION_FORMAT_INSTRUCTION = (
-    "回答中引用参考内容时，请使用 <sup>N</sup> 格式标注，N 为参考编号（1、2、3...），"
-    "不要使用「条目[N]」或「[N]」等格式。"
-)
+CITATION_FORMAT_INSTRUCTION = """## 引用格式（必须严格遵守）
+引用参考内容时，必须且只能使用 <sup>N</sup> 格式，N 为参考编号（1、2、3...）。
+正确示例：具体见<sup>1</sup>；对比见<sup>2</sup>；详见<sup>3</sup>。
+严禁使用以下无效格式：条目[1]、参考条目[N]、[1]、[2]、对比见[2]、见[N]、（[1]）等。
+若需引用编号 N 对应的内容，在句中直接写 <sup>N</sup> 即可，系统会自动渲染为可溯源链接。"""
 
 # 用于前端 Sources 的 snippet 截取长度
 CITATION_SNIPPET_LENGTH = 150
@@ -53,6 +55,50 @@ def build_citations_from_docs(docs: List) -> List[Dict[str, Any]]:
             "snippet": snippet,
         })
     return citations
+
+
+# 匹配 <sup>N</sup> 中的 N
+_SUP_CITATION_PATTERN = re.compile(r"<sup>\s*(\d+)\s*</sup>", re.IGNORECASE)
+
+# 将常见无效引用格式替换为 <sup>N</sup> 的后处理正则
+_CITATION_NORMALIZE_PATTERNS = [
+    (re.compile(r"条目\[(\d+)\]"), r"<sup>\1</sup>"),
+    (re.compile(r"参考条目\[(\d+)\]"), r"<sup>\1</sup>"),
+    (re.compile(r"对比见\[(\d+)\]"), r"对比见<sup>\1</sup>"),
+    (re.compile(r"具体见\[(\d+)\]"), r"具体见<sup>\1</sup>"),
+    (re.compile(r"见\[(\d+)\]"), r"见<sup>\1</sup>"),
+    (re.compile(r"（\[(\d+)\]）"), r"（<sup>\1</sup>）"),
+    (re.compile(r"\[(\d+)\]"), r"<sup>\1</sup>"),  # 兜底：独立 [N]
+]
+
+
+def normalize_citation_format(content: str) -> str:
+    """
+    将回复中常见的无效引用格式（条目[1]、[2]、对比见[2] 等）替换为 <sup>N</sup>，
+    以便前端 Sources 组件正确渲染。
+    """
+    if not content:
+        return content
+    result = content
+    for pattern, repl in _CITATION_NORMALIZE_PATTERNS:
+        result = pattern.sub(repl, result)
+    return result
+
+
+def filter_citations_by_referenced(content: str, citations: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    根据回复内容中实际出现的 <sup>N</sup> 引用，过滤 citations，只保留被引用的条目。
+    若 content 中未出现任何 <sup>N</sup>，返回空列表。
+    """
+    if not content or not citations:
+        return []
+    referenced = set()
+    for m in _SUP_CITATION_PATTERN.finditer(content):
+        referenced.add(int(m.group(1)))
+    if not referenced:
+        return []
+    key_to_citation = {c["key"]: c for c in citations}
+    return [key_to_citation[k] for k in sorted(referenced) if k in key_to_citation]
 
 
 class RAGService:
