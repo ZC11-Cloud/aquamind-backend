@@ -36,3 +36,11 @@ class KnowledgeDeleteResponse(BaseModel):
     """删除文档响应"""
     source_id: str
     chunks_deleted: int
+
+
+class KnowledgeDocumentContentResponse(BaseModel):
+    """文档完整正文响应（用于文档阅读）"""
+    source_id: str
+    original_filename: str
+    content: str
+    file_ext: str  # 如 .md .txt .pdf，供前端决定是否用 Markdown 渲染

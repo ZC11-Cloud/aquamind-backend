@@ -180,6 +180,18 @@ class KnowledgeService:
                 count_by_source[meta["source"]] += 1
         return [{"source_id": sid, "chunk_count": c} for sid, c in sorted(count_by_source.items())]
 
+    def get_document_content(self, file_path: str) -> str:
+        """
+        读取文档完整正文，用于前端文档阅读。
+
+        :param file_path: 文档绝对路径。
+        :return: 完整文本内容。
+        """
+        raw_docs = self._load_documents(file_path)
+        if not raw_docs:
+            return ""
+        return "".join(d.page_content for d in raw_docs).replace("\r\n", "\n").strip()
+
     def get_retriever(self, top_k: Optional[int] = None, **kwargs):
         """
         返回当前 collection 的 Retriever，供 RAG 链使用。

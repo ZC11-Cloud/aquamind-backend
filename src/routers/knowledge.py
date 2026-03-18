@@ -19,6 +19,7 @@ from src.schemas.knowledge import (
     KnowledgeDocumentItem,
     KnowledgeDocumentListResponse,
     KnowledgeDeleteResponse,
+    KnowledgeDocumentContentResponse,
 )
 from src.service.knowledge_service import (
     create_knowledge_service,
@@ -199,6 +200,54 @@ async def get_document(
         tags=row.tags or [],
         create_time=row.create_time,
         chunk_count=chunk_map.get(row.source_id, 0),
+    )
+
+
+@router.get("/documents/{source_id}/content", response_model=KnowledgeDocumentContentResponse)
+async def get_document_content(
+    source_id: str,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """获取文档完整正文，用于前端文档阅读。"""
+    if not source_id.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="source_id 不能为空",
+        )
+    result = await session.execute(
+        select(KnowledgeDocument).where(KnowledgeDocument.source_id == source_id)
+    )
+    row = result.scalar_one_or_none()
+    if row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="文档不存在",
+        )
+    storage_path = row.storage_path or row.source_id
+    upload_dir = Path(KNOWLEDGE_UPLOAD_DIR)
+    file_path = upload_dir / storage_path
+    if not file_path.is_file():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="文档文件不存在或已删除",
+        )
+    kb = _get_knowledge_service()
+    try:
+        content = await asyncio.to_thread(kb.get_document_content, str(file_path))
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="文档文件不存在",
+        ) from None
+    file_ext = Path(row.original_filename).suffix.lower() or ""
+    return KnowledgeDocumentContentResponse(
+        source_id=row.source_id,
+        original_filename=row.original_filename,
+        content=content,
+        file_ext=file_ext,
     )
 
 
