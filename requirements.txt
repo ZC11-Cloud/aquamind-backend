@@ -109,3 +109,4 @@ yarl==1.22.0
 zstandard==0.25.0
 chromadb==1.4.1
 pypdf==6.7.0
+docx2txt==0.9

@@ -50,7 +50,7 @@ def _get_knowledge_service() -> KnowledgeService:
 
 @router.post("/upload", response_model=KnowledgeUploadResponse, status_code=status.HTTP_201_CREATED)
 async def upload_document(
-    file: UploadFile = File(..., description="知识库文档（PDF/TXT/MD）"),
+    file: UploadFile = File(..., description="知识库文档（PDF/TXT/MD/DOCX）"),
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):

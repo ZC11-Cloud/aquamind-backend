@@ -32,3 +32,8 @@ data/chroma_kb/*
 # 用户上传的知识库文件（运行时生成，不提交）
 uploads/
 data/chroma_kb/chroma.sqlite3
+backend/data/chroma_kb/chroma.sqlite3
+backend/data/chroma_kb/b5f48142-6976-489c-bf91-f8ad23b44dd5/data_level0.bin
+backend/data/chroma_kb/b5f48142-6976-489c-bf91-f8ad23b44dd5/header.bin
+backend/data/chroma_kb/b5f48142-6976-489c-bf91-f8ad23b44dd5/length.bin
+backend/data/chroma_kb/b5f48142-6976-489c-bf91-f8ad23b44dd5/link_lists.bin
