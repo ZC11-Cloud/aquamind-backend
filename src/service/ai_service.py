@@ -12,7 +12,7 @@ ChatTongyi = ChatTongyiDashScope
 
 
 class AIService:
-    def __init__(self, api_key: str, model_name: str = "qwen3.5-plus"):
+    def __init__(self, api_key: str, model_name: str = "qwen-plus"):
         """
         初始化AI服务
 
@@ -32,7 +32,7 @@ class AIService:
         """
         根据传入的模型名获取 ChatTongyi 实例；未传或非法时回退到默认模型。
         """
-        name = (model_name or self.default_model_name) or "qwen3.5-plus"
+        name = (model_name or self.default_model_name) or "qwen-plus"
         # 这里直接按需创建实例，模型数量有限，性能影响可接受
         logger.info(f"Getting model: {name}")
         return ChatTongyi(model=name, api_key=self.api_key)  # type: ignore
@@ -125,5 +125,5 @@ class AIService:
 
 
 # 工厂函数，用于创建AIService实例
-def create_ai_service(api_key: str, model_name: str = "qwen3.5-plus") -> AIService:
+def create_ai_service(api_key: str, model_name: str = "qwen-plus") -> AIService:
     return AIService(api_key=api_key, model_name=model_name)
