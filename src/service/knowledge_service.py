@@ -192,6 +192,32 @@ class KnowledgeService:
             return ""
         return "".join(d.page_content for d in raw_docs).replace("\r\n", "\n").strip()
 
+    def search_documents(self, query: str, top_k: Optional[int] = None) -> List[dict]:
+        """
+        在向量库中按语义检索文档片段。
+
+        :param query: 搜索关键词/问题。
+        :param top_k: 返回条数。
+        :return: [{source_id, content, score}, ...]
+        """
+        q = (query or "").strip()
+        if not q:
+            return []
+        k = top_k if top_k is not None else RAG_TOP_K
+        results = self._vector_store.similarity_search_with_score(q, k=k)
+        hits: List[dict] = []
+        for doc, score in results:
+            source_id = doc.metadata.get("source") if isinstance(doc.metadata, dict) else ""
+            content = (doc.page_content or "").strip()
+            hits.append(
+                {
+                    "source_id": source_id or "",
+                    "content": content,
+                    "score": float(score) if score is not None else None,
+                }
+            )
+        return hits
+
     def get_retriever(self, top_k: Optional[int] = None, **kwargs):
         """
         返回当前 collection 的 Retriever，供 RAG 链使用。

@@ -44,3 +44,18 @@ class KnowledgeDocumentContentResponse(BaseModel):
     original_filename: str
     content: str
     file_ext: str  # 如 .md .txt .pdf，供前端决定是否用 Markdown 渲染
+
+
+class KnowledgeSearchHit(BaseModel):
+    """知识库搜索命中项。"""
+    source_id: str
+    original_filename: str
+    content: str
+    score: float | None = None
+
+
+class KnowledgeSearchResponse(BaseModel):
+    """知识库搜索响应。"""
+    query: str
+    total: int
+    hits: List[KnowledgeSearchHit]

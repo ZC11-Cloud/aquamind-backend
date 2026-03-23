@@ -20,6 +20,8 @@ from src.schemas.knowledge import (
     KnowledgeDocumentListResponse,
     KnowledgeDeleteResponse,
     KnowledgeDocumentContentResponse,
+    KnowledgeSearchResponse,
+    KnowledgeSearchHit,
 )
 from src.service.knowledge_service import (
     create_knowledge_service,
@@ -248,6 +250,63 @@ async def get_document_content(
         original_filename=row.original_filename,
         content=content,
         file_ext=file_ext,
+    )
+
+
+@router.get("/search", response_model=KnowledgeSearchResponse)
+async def search_documents(
+    q: str = Query(..., min_length=1, description="搜索关键词"),
+    top_k: int = Query(10, ge=1, le=50, description="返回结果条数"),
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """搜索知识库文档片段（语义检索）。"""
+    query_text = q.strip()
+    if not query_text:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="搜索关键词不能为空",
+        )
+    kb = _get_knowledge_service()
+    try:
+        raw_hits = await asyncio.to_thread(kb.search_documents, query_text, top_k)
+    except Exception as e:
+        logger.exception("知识库搜索失败: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="知识库搜索失败",
+        ) from e
+    source_ids = list(
+        {
+            str(item.get("source_id") or "").strip()
+            for item in raw_hits
+            if str(item.get("source_id") or "").strip()
+        }
+    )
+    filename_map: dict[str, str] = {}
+    if source_ids:
+        result = await session.execute(
+            select(KnowledgeDocument.source_id, KnowledgeDocument.original_filename).where(
+                KnowledgeDocument.source_id.in_(source_ids)
+            )
+        )
+        filename_map = {sid: name for sid, name in result.all()}
+    hits = [
+        KnowledgeSearchHit(
+            source_id=item.get("source_id") or "",
+            original_filename=filename_map.get(
+                item.get("source_id") or "",
+                item.get("source_id") or "未知文档",
+            ),
+            content=(item.get("content") or "").strip(),
+            score=item.get("score"),
+        )
+        for item in raw_hits
+    ]
+    return KnowledgeSearchResponse(
+        query=query_text,
+        total=len(hits),
+        hits=hits,
     )
 
 
