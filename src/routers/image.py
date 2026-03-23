@@ -23,10 +23,10 @@ logger = logging.getLogger(__name__)
 ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "bmp", "webp"}
 MAX_FILE_SIZE = 20 * 1024 * 1024  # 20MB
 
-# LLM 增强：固定使用 qwen-plus，阶段一不暴露模型选择
+# LLM 增强：纯文本调用，使用走 text-generation 的模型（避免无谓多模态计费）
 _ai_service = None
 if DASHSCOPE_API_KEY:
-    _ai_service = create_ai_service(api_key=DASHSCOPE_API_KEY, model_name="qwen-plus")
+    _ai_service = create_ai_service(api_key=DASHSCOPE_API_KEY, model_name="qwen3-max")
 
 # LLM 解析：从回复中提取「中文名称」和「简短描述」
 _LLM_NAME_PATTERN = re.compile(r"中文名称[：:\s]+(.+?)(?:\n|$)", re.DOTALL)

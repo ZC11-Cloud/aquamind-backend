@@ -18,6 +18,7 @@ from langchain_core.tools import BaseTool
 
 from src.service.ai_service import AIService
 from src.service.knowledge_service import KnowledgeService
+from src.service.llm_content_utils import normalize_message_content
 from src.tools.agent_tools import create_agent_tools
 
 logger = logging.getLogger(__name__)
@@ -115,14 +116,9 @@ class AgentService:
                 if not isinstance(chunk, AIMessageChunk):
                     continue
                 # 真流式：有文本内容就立即 yield
-                content = chunk.content
-                if content is not None:
-                    if isinstance(content, list):
-                        content = "".join(
-                            (c.get("text", "") if isinstance(c, dict) else str(c) for c in content)
-                        )
-                    if isinstance(content, str) and content:
-                        yield content
+                text = normalize_message_content(chunk.content)
+                if text:
+                    yield text
                 accumulated = chunk if accumulated is None else accumulated + chunk
 
             response = accumulated

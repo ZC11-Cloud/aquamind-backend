@@ -1,12 +1,18 @@
 from typing import List, Dict, Any, AsyncGenerator
-from langchain_openai import ChatOpenAI
-from langchain_community.chat_models.tongyi import ChatTongyi
 from langchain.messages import HumanMessage, AIMessage, SystemMessage
-from pydantic import SecretStr
+
+from src.service.dashscope_chat_tongyi import ChatTongyiDashScope
+from src.service.llm_content_utils import normalize_message_content
+
 import logging
 logger = logging.getLogger(__name__)
+
+# 使用 ChatTongyiDashScope，保证 qwen3.5-plus 等走 multimodal-generation 端点
+ChatTongyi = ChatTongyiDashScope
+
+
 class AIService:
-    def __init__(self, api_key: str, model_name: str = "qwen-plus"):
+    def __init__(self, api_key: str, model_name: str = "qwen3.5-plus"):
         """
         初始化AI服务
 
@@ -26,7 +32,7 @@ class AIService:
         """
         根据传入的模型名获取 ChatTongyi 实例；未传或非法时回退到默认模型。
         """
-        name = (model_name or self.default_model_name) or "qwen-plus"
+        name = (model_name or self.default_model_name) or "qwen3.5-plus"
         # 这里直接按需创建实例，模型数量有限，性能影响可接受
         logger.info(f"Getting model: {name}")
         return ChatTongyi(model=name, api_key=self.api_key)  # type: ignore
@@ -65,10 +71,7 @@ class AIService:
         model = self._get_model(model_name)
         response = model.invoke(langchain_messages)
 
-        content = response.content
-        if isinstance(content, list):
-            content = str(content)
-        return content
+        return normalize_message_content(response.content)
 
     async def generate_response_stream(
         self,
@@ -99,13 +102,9 @@ class AIService:
 
         model = self._get_model(model_name)
         async for chunk in model.astream(langchain_messages):
-            content = chunk.content
-            if content is None:
-                continue
-            if isinstance(content, list):
-                content = str(content)
-            if isinstance(content, str) and content:
-                yield content
+            text = normalize_message_content(chunk.content)
+            if text:
+                yield text
 
     async def generate_short_title(self, user_question: str) -> str:
         """
@@ -126,5 +125,5 @@ class AIService:
 
 
 # 工厂函数，用于创建AIService实例
-def create_ai_service(api_key: str, model_name: str = "qwen-plus") -> AIService:
+def create_ai_service(api_key: str, model_name: str = "qwen3.5-plus") -> AIService:
     return AIService(api_key=api_key, model_name=model_name)
