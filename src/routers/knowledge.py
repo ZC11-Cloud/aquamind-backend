@@ -8,6 +8,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, status, UploadFile
+from fastapi.responses import FileResponse
 from sqlalchemy import select, func, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -250,6 +251,43 @@ async def get_document_content(
         original_filename=row.original_filename,
         content=content,
         file_ext=file_ext,
+    )
+
+
+@router.get("/documents/{source_id}/download")
+async def download_document(
+    source_id: str,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """下载或预览文档原文件（PDF 可用于前端内嵌预览）。"""
+    if not source_id.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="source_id 不能为空",
+        )
+    result = await session.execute(
+        select(KnowledgeDocument).where(KnowledgeDocument.source_id == source_id)
+    )
+    row = result.scalar_one_or_none()
+    if row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="文档不存在",
+        )
+    storage_path = row.storage_path or row.source_id
+    file_path = Path(KNOWLEDGE_UPLOAD_DIR) / storage_path
+    if not file_path.is_file():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="文档文件不存在或已删除",
+        )
+    suffix = file_path.suffix.lower()
+    media_type = "application/pdf" if suffix == ".pdf" else "application/octet-stream"
+    return FileResponse(
+        path=str(file_path),
+        media_type=media_type,
+        filename=row.original_filename,
     )
 
 
