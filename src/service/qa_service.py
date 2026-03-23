@@ -276,6 +276,8 @@ class QaService:
                 async for chunk in self.agent_service.run_agent_stream(
                     messages_history=messages_history,
                     current_user_content=current_user_content,
+                    model_name=model_name,
+                    image_base64=image_base64 if use_image and image_base64 else None,
                 ):
                     full_content.append(chunk)
                     yield chunk

@@ -17,6 +17,7 @@ from langchain_core.messages import (
 from langchain_core.tools import BaseTool
 
 from src.service.ai_service import AIService
+from src.service.dashscope_chat_tongyi import is_multimodal_model
 from src.service.knowledge_service import KnowledgeService
 from src.service.llm_content_utils import normalize_message_content
 from src.tools.agent_tools import create_agent_tools
@@ -77,8 +78,15 @@ class AgentService:
         self._tools = create_agent_tools(knowledge_service, yolo_service)
         self._tools_by_name = {t.name: t for t in self._tools}
 
-    def _model_with_tools(self):
-        return self.ai_service.chat_model.bind_tools(self._tools)
+    def _model_with_tools(self, model_name: Optional[str] = None):
+        return self.ai_service._get_model(model_name).bind_tools(self._tools)
+
+    @staticmethod
+    def _as_data_url(image_base64: str) -> str:
+        img = (image_base64 or "").strip()
+        if img.startswith("data:image/"):
+            return img
+        return f"data:image/jpeg;base64,{img}"
 
     async def run_agent_stream(
         self,
@@ -86,6 +94,8 @@ class AgentService:
         current_user_content: str,
         system_prompt: Optional[str] = None,
         inject_messages: Optional[List[BaseMessage]] = None,
+        model_name: Optional[str] = None,
+        image_base64: Optional[str] = None,
     ) -> AsyncGenerator[str, None]:
         """
         运行 Agent 循环，流式 yield 最终回复的每个 chunk。
@@ -101,9 +111,20 @@ class AgentService:
         ]
         if inject_messages:
             langchain_messages.extend(inject_messages)
-        langchain_messages.append(HumanMessage(content=current_user_content))
+        if image_base64 and is_multimodal_model(model_name):
+            # 多模态模型：在用户文本外附上原图，让模型直接看到图片。
+            langchain_messages.append(
+                HumanMessage(
+                    content=[
+                        {"text": current_user_content},
+                        {"image": self._as_data_url(image_base64)},
+                    ]
+                )
+            )
+        else:
+            langchain_messages.append(HumanMessage(content=current_user_content))
 
-        model = self._model_with_tools()
+        model = self._model_with_tools(model_name)
         response: Optional[BaseMessage] = None
         max_iterations = 10
         iteration = 0

@@ -20,6 +20,25 @@ from langchain_community.chat_models.tongyi import ChatTongyi
 from langchain_core.utils import convert_to_secret_str, get_from_dict_or_env, pre_init
 
 
+EXPLICIT_MULTIMODAL_MODELS = {
+    "qwen-audio-turbo",
+    "qwen-audio-turbo-latest",
+    "qwen-vl-plus",
+    "qwen-vl-plus-latest",
+    "qwen-vl-max",
+    "qwen-vl-max-latest",
+    # 文档明确：qwen3.5-plus / flash 需走 multimodal-generation
+    "qwen3.5-plus",
+    "qwen3.5-flash",
+}
+
+
+def is_multimodal_model(model_name: str | None) -> bool:
+    """判断模型是否应走 DashScope 多模态端点。"""
+    name = (model_name or "").strip().lower()
+    return bool(name) and (name in EXPLICIT_MULTIMODAL_MODELS or "vl" in name)
+
+
 class ChatTongyiDashScope(ChatTongyi):
     """与 ChatTongyi 行为一致，但将百炼要求走多模态端点的模型纳入 MultiModalConversation。"""
 
@@ -36,20 +55,9 @@ class ChatTongyiDashScope(ChatTongyi):
                 "Please install it with `pip install dashscope --upgrade`."
             ) from e
 
-        dashscope_multimodal_models = [
-            "qwen-audio-turbo",
-            "qwen-audio-turbo-latest",
-            "qwen-vl-plus",
-            "qwen-vl-plus-latest",
-            "qwen-vl-max",
-            "qwen-vl-max-latest",
-            # 文档明确：qwen3.5-plus 等须 multimodal-generation，误用 text-generation 报 url error
-            "qwen3.5-plus",
-            "qwen3.5-flash",
-        ]
         model_name = values.get("model_name") or values.get("model") or ""
 
-        if model_name in dashscope_multimodal_models or "vl" in model_name:
+        if is_multimodal_model(model_name):
             try:
                 values["client"] = dashscope.MultiModalConversation
             except AttributeError as e:
