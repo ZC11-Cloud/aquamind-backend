@@ -6,6 +6,7 @@ from sqlalchemy.future import select
 from sqlalchemy import func, delete, update
 from typing import List, Optional, TYPE_CHECKING, AsyncGenerator, Dict, Any
 
+from src.models import AsyncSessionFactory
 from src.models.qa import QaConversation, QaMessage
 from src.models.document import KnowledgeDocument
 from src.schemas.qa import QaConversationCreate, QaMessageCreate
@@ -42,6 +43,27 @@ async def _enrich_citations_with_filename(
     for c in citations:
         c["filename"] = filename_map.get(c["source_id"], c.get("filename", c["source_id"]))
     return citations
+
+
+async def _persist_truncated_assistant_message(
+    conversation_id: int,
+    content_text: str,
+    citations: Optional[List[Dict[str, Any]]] = None,
+) -> None:
+    """在独立会话中持久化被中断的 assistant 截断消息。"""
+    session = AsyncSessionFactory()
+    try:
+        async with session.begin():
+            session.add(
+                QaMessage(
+                    conversation_id=conversation_id,
+                    role="assistant",
+                    content=content_text,
+                    citations=citations if citations else None,
+                )
+            )
+    finally:
+        await session.close()
 
 
 class QaService:
@@ -154,6 +176,7 @@ class QaService:
         conversation_id: int,
         user_id: int,
         message_data: QaMessageCreate,
+        cancel_event: asyncio.Event | None = None,
     ) -> AsyncGenerator[str, None]:
         """
         流式发送消息：先落库用户消息，再按 chunk 流式生成 AI 回复并 yield，最后落库 assistant 消息。
@@ -197,6 +220,7 @@ class QaService:
         model_name = getattr(message_data, "model_name", None)
         full_content: List[str] = []
         stream_citations: List[Dict[str, Any]] = []
+        cancelled = False
 
         # 调试：流式分支与图像识别条件
         has_agent = self.agent_service is not None
@@ -207,6 +231,8 @@ class QaService:
         )
 
         try:
+            if cancel_event and cancel_event.is_set():
+                raise asyncio.CancelledError
             # 仅在需要知识库或图像识别时才走 Agent 编排，其余场景走纯 LLM 流式回复，保证默认问答有真实流式体验
             use_agent = self.agent_service is not None and (use_rag or use_image)
             if use_agent:
@@ -279,6 +305,8 @@ class QaService:
                     model_name=model_name,
                     image_base64=image_base64 if use_image and image_base64 else None,
                 ):
+                    if cancel_event and cancel_event.is_set():
+                        raise asyncio.CancelledError
                     full_content.append(chunk)
                     yield chunk
             elif use_rag:
@@ -297,6 +325,8 @@ class QaService:
                 full_content = []
                 chunk_size = 50
                 for i in range(0, len(ai_response), chunk_size):
+                    if cancel_event and cancel_event.is_set():
+                        raise asyncio.CancelledError
                     chunk = ai_response[i : i + chunk_size]
                     full_content.append(chunk)
                     yield chunk
@@ -310,13 +340,58 @@ class QaService:
                     system_prompt="你是一个智能助手，帮助用户解答问题。",
                     model_name=model_name,
                 ):
+                    if cancel_event and cancel_event.is_set():
+                        raise asyncio.CancelledError
                     full_content.append(chunk)
                     yield chunk
+        except asyncio.CancelledError:
+            cancelled = True
+            logger.info(
+                "流式消息已取消，conversation_id=%s",
+                conversation_id,
+            )
         finally:
             content_text = "".join(full_content)
             content_text = normalize_citation_format(content_text)
             # 只保留回复中实际引用的 citations（<sup>N</sup>）
             stream_citations = filter_citations_by_referenced(content_text, stream_citations)
+            is_cancelled = cancelled or (cancel_event and cancel_event.is_set())
+
+            if is_cancelled:
+                # 用户中断时：若已生成部分内容，则保存截断结果；不再发送 done 事件
+                if content_text.strip():
+                    persist_task = asyncio.create_task(
+                        _persist_truncated_assistant_message(
+                            conversation_id=conversation_id,
+                            content_text=content_text,
+                            citations=stream_citations,
+                        )
+                    )
+                    try:
+                        await asyncio.shield(persist_task)
+                        logger.info(
+                            "流式消息取消后已保存截断 assistant 消息，conversation_id=%s, content_len=%d",
+                            conversation_id,
+                            len(content_text),
+                        )
+                    except asyncio.CancelledError:
+                        # 请求任务可能已被上游取消，后台任务仍会继续执行持久化
+                        logger.warning(
+                            "取消写库 await 被中断，截断消息持久化仍在后台继续, conversation_id=%s",
+                            conversation_id,
+                        )
+                    except Exception:
+                        logger.exception(
+                            "流式取消后保存截断 assistant 消息失败, conversation_id=%s",
+                            conversation_id,
+                        )
+                else:
+                    logger.info(
+                        "流式消息取消且无可保存内容，conversation_id=%s",
+                        conversation_id,
+                    )
+                return
+
             # 仅在生成了内容时落库，避免因 DashScope 等异常导致保存空回复
             if content_text.strip():
                 assistant_message = QaMessage(

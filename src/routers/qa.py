@@ -1,6 +1,8 @@
 import json
 import logging
-from fastapi import APIRouter, Depends, HTTPException, status
+import asyncio
+import contextlib
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List
@@ -103,6 +105,7 @@ async def send_message(
 
 @router.post("/conversations/{conversation_id}/messages/stream")
 async def send_message_stream(
+    request: Request,
     conversation_id: int,
     message_data: QaMessageCreate,
     current_user: User = Depends(get_current_user),
@@ -120,20 +123,74 @@ async def send_message_stream(
     qa_service = _get_qa_service(session)
 
     async def event_stream():
+        cancel_event = asyncio.Event()
+        queue: asyncio.Queue[str | None] = asyncio.Queue(maxsize=16)
+
+        async def producer():
+            try:
+                async for chunk in qa_service.send_message_stream(
+                    conversation_id,
+                    current_user.id,
+                    message_data,
+                    cancel_event=cancel_event,
+                ):
+                    if cancel_event.is_set():
+                        break
+                    if isinstance(chunk, dict):
+                        payload = json.dumps(chunk, ensure_ascii=False)
+                    else:
+                        payload = json.dumps(
+                            {"type": "chunk", "content": chunk},
+                            ensure_ascii=False,
+                        )
+                    await queue.put(f"data: {payload}\n\n")
+            except asyncio.CancelledError:
+                cancel_event.set()
+                raise
+            except ValueError as e:
+                await queue.put(
+                    f"data: {json.dumps({'type': 'error', 'detail': str(e)}, ensure_ascii=False)}\n\n"
+                )
+            except Exception as e:
+                logger.exception("流式消息异常: %s", e)
+                await queue.put(
+                    f"data: {json.dumps({'type': 'error', 'detail': str(e)}, ensure_ascii=False)}\n\n"
+                )
+            finally:
+                await queue.put(None)
+
+        producer_task = asyncio.create_task(producer())
         try:
-            async for chunk in qa_service.send_message_stream(
-                conversation_id, current_user.id, message_data
-            ):
-                if isinstance(chunk, dict):
-                    payload = json.dumps(chunk, ensure_ascii=False)
-                else:
-                    payload = json.dumps({"type": "chunk", "content": chunk}, ensure_ascii=False)
-                yield f"data: {payload}\n\n"
-        except ValueError as e:
-            yield f"data: {json.dumps({'type': 'error', 'detail': str(e)}, ensure_ascii=False)}\n\n"
-        except Exception as e:
-            logger.exception("流式消息异常: %s", e)
-            yield f"data: {json.dumps({'type': 'error', 'detail': str(e)}, ensure_ascii=False)}\n\n"
+            while True:
+                if await request.is_disconnected():
+                    cancel_event.set()
+                    logger.info(
+                        "检测到客户端断开，取消流式生成, conversation_id=%s",
+                        conversation_id,
+                    )
+                    break
+                try:
+                    item = await asyncio.wait_for(queue.get(), timeout=0.2)
+                except asyncio.TimeoutError:
+                    continue
+                if item is None:
+                    break
+                yield item
+        finally:
+            cancel_event.set()
+            try:
+                await asyncio.wait_for(producer_task, timeout=2.0)
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "流式任务优雅退出超时，执行强制取消, conversation_id=%s",
+                    conversation_id,
+                )
+                producer_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await producer_task
+            except asyncio.CancelledError:
+                with contextlib.suppress(asyncio.CancelledError):
+                    await producer_task
 
     # 校验失败抛出 ValueError；其他异常统一 yield error 事件供前端展示
     return StreamingResponse(
