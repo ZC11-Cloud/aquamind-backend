@@ -19,6 +19,10 @@ class QaMessageCreate(BaseModel):
     image_base64: Optional[str] = None  # 可选，base64 编码的图片，与 use_image 配合
     # 可选：指定模型（如 qwen3.5-plus、qwen3-max、qwen3-vl-plus 等），不传则走默认
     model_name: Optional[str] = None
+    # 深度思考参数（OpenAI 兼容扩展参数）
+    enable_thinking: Optional[bool] = None
+    thinking_budget: Optional[int] = None
+    preserve_thinking: Optional[bool] = None
 
 
 class QaMessageResponse(BaseModel):
@@ -27,6 +31,7 @@ class QaMessageResponse(BaseModel):
     conversation_id: int
     role: str
     content: str
+    reasoning_content: Optional[str] = None
     image_url: Optional[str] = None
     citations: Optional[List[KnowledgeCitation]] = None
     create_time: datetime

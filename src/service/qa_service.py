@@ -48,6 +48,7 @@ async def _enrich_citations_with_filename(
 async def _persist_truncated_assistant_message(
     conversation_id: int,
     content_text: str,
+    reasoning_text: str = "",
     citations: Optional[List[Dict[str, Any]]] = None,
 ) -> None:
     """在独立会话中持久化被中断的 assistant 截断消息。"""
@@ -59,6 +60,7 @@ async def _persist_truncated_assistant_message(
                     conversation_id=conversation_id,
                     role="assistant",
                     content=content_text,
+                    reasoning_content=reasoning_text or None,
                     citations=citations if citations else None,
                 )
             )
@@ -125,14 +127,13 @@ class QaService:
           history_messages = history_result.scalars().all()
 
           # 转换为AI服务需要的格式
-          messages_history = []
-          for msg in history_messages:
-              messages_history.append({
-                  "role": msg.role,
-                  "content": msg.content
-              })
+          preserve_thinking = bool(getattr(message_data, "preserve_thinking", False))
+          messages_history = self._build_messages_history(
+              history_messages, preserve_thinking=preserve_thinking
+          )
           # 根据是否启用 RAG 选择调用方式；RAG 失败（如网络/SSL）时降级为纯 LLM
           model_name = getattr(message_data, "model_name", None)
+          model_kwargs = self._build_model_kwargs(message_data)
           use_rag = getattr(message_data, "use_rag", False) and self.rag_service
           citations: List[Dict[str, Any]] = []
           if use_rag:
@@ -151,6 +152,7 @@ class QaService:
                   ai_response = await self.ai_service.generate_response(
                       messages=messages_history,
                       system_prompt="你是一个智能助手，帮助用户解答问题。",
+                      model_kwargs=model_kwargs,
                   )
                   citations = []
           else:
@@ -160,6 +162,7 @@ class QaService:
                   messages=messages_history,
                   system_prompt="你是一个智能助手，帮助用户解答问题。",
                   model_name=model_name,
+                  model_kwargs=model_kwargs,
               )
           assistant_message = QaMessage(
               conversation_id=conversation_id,
@@ -210,15 +213,18 @@ class QaService:
             ).order_by(QaMessage.create_time.asc())
             history_result = await self.session.execute(history_stmt)
             history_messages = history_result.scalars().all()
-            messages_history = [
-                {"role": msg.role, "content": msg.content} for msg in history_messages
-            ]
+            preserve_thinking = bool(getattr(message_data, "preserve_thinking", False))
+            messages_history = self._build_messages_history(
+                history_messages, preserve_thinking=preserve_thinking
+            )
 
         use_rag = getattr(message_data, "use_rag", False) and self.rag_service
         use_image = getattr(message_data, "use_image", False)
         image_base64 = getattr(message_data, "image_base64", None) or ""
         model_name = getattr(message_data, "model_name", None)
+        model_kwargs = self._build_model_kwargs(message_data)
         full_content: List[str] = []
+        full_reasoning: List[str] = []
         stream_citations: List[Dict[str, Any]] = []
         cancelled = False
 
@@ -303,6 +309,7 @@ class QaService:
                     messages_history=messages_history,
                     current_user_content=current_user_content,
                     model_name=model_name,
+                    model_kwargs=model_kwargs,
                     image_base64=image_base64 if use_image and image_base64 else None,
                 ):
                     if cancel_event and cancel_event.is_set():
@@ -335,15 +342,24 @@ class QaService:
                     "本次流式回答未使用知识库, conversation_id=%s",
                     conversation_id,
                 )
-                async for chunk in self.ai_service.generate_response_stream(
+                async for event in self.ai_service.generate_response_stream(
                     messages=messages_history,
                     system_prompt="你是一个智能助手，帮助用户解答问题。",
                     model_name=model_name,
+                    model_kwargs=model_kwargs,
                 ):
                     if cancel_event and cancel_event.is_set():
                         raise asyncio.CancelledError
-                    full_content.append(chunk)
-                    yield chunk
+                    if event.get("type") == "reasoning_chunk":
+                        reasoning_chunk = event.get("content", "")
+                        if reasoning_chunk:
+                            full_reasoning.append(reasoning_chunk)
+                            yield event
+                        continue
+                    text_chunk = event.get("content", "")
+                    if text_chunk:
+                        full_content.append(text_chunk)
+                        yield event
         except asyncio.CancelledError:
             cancelled = True
             logger.info(
@@ -352,6 +368,7 @@ class QaService:
             )
         finally:
             content_text = "".join(full_content)
+            reasoning_text = "".join(full_reasoning)
             content_text = normalize_citation_format(content_text)
             # 只保留回复中实际引用的 citations（<sup>N</sup>）
             stream_citations = filter_citations_by_referenced(content_text, stream_citations)
@@ -364,6 +381,7 @@ class QaService:
                         _persist_truncated_assistant_message(
                             conversation_id=conversation_id,
                             content_text=content_text,
+                            reasoning_text=reasoning_text,
                             citations=stream_citations,
                         )
                     )
@@ -398,6 +416,7 @@ class QaService:
                     conversation_id=conversation_id,
                     role="assistant",
                     content=content_text,
+                    reasoning_content=reasoning_text or None,
                     citations=stream_citations if stream_citations else None,
                 )
                 self.session.add(assistant_message)
@@ -409,6 +428,36 @@ class QaService:
                 )
             # 流式协议：最后 yield done 事件，携带 citations 供前端 Sources 使用
             yield {"type": "done", "citations": stream_citations}
+
+    @staticmethod
+    def _build_model_kwargs(message_data: QaMessageCreate) -> Dict[str, Any]:
+        kwargs: Dict[str, Any] = {}
+        enable_thinking = getattr(message_data, "enable_thinking", None)
+        thinking_budget = getattr(message_data, "thinking_budget", None)
+        preserve_thinking = getattr(message_data, "preserve_thinking", None)
+        if enable_thinking is not None:
+            kwargs["enable_thinking"] = bool(enable_thinking)
+        if thinking_budget is not None:
+            kwargs["thinking_budget"] = int(thinking_budget)
+        if preserve_thinking is not None:
+            kwargs["preserve_thinking"] = bool(preserve_thinking)
+        return kwargs
+
+    @staticmethod
+    def _build_messages_history(
+        history_messages: List[QaMessage], preserve_thinking: bool = False
+    ) -> List[Dict[str, str]]:
+        messages_history: List[Dict[str, str]] = []
+        for msg in history_messages:
+            content = msg.content
+            # preserve_thinking 打开时，将历史 assistant 的 reasoning 拼接进输入上下文
+            if preserve_thinking and msg.role == "assistant" and msg.reasoning_content:
+                content = (
+                    f"{content}\n\n[assistant_reasoning_context]\n"
+                    f"{msg.reasoning_content}\n[/assistant_reasoning_context]"
+                )
+            messages_history.append({"role": msg.role, "content": content})
+        return messages_history
 
     async def get_conversations(self, user_id: int, skip: int = 0, limit: int = 10) -> tuple[List[QaConversation], int]:
         async with self.session.begin():

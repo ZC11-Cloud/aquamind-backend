@@ -28,20 +28,26 @@ class AIService:
         """返回用于 Agent 的 ChatTongyi 实例，支持 bind_tools 与 astream。"""
         return self._get_model()
 
-    def _get_model(self, model_name: str | None = None) -> ChatTongyi:
+    def _get_model(
+        self,
+        model_name: str | None = None,
+        model_kwargs: Dict[str, Any] | None = None,
+    ) -> ChatTongyi:
         """
         根据传入的模型名获取 ChatTongyi 实例；未传或非法时回退到默认模型。
         """
         name = (model_name or self.default_model_name) or "qwen-plus"
         # 这里直接按需创建实例，模型数量有限，性能影响可接受
         logger.info(f"Getting model: {name}")
-        return ChatTongyi(model=name, api_key=self.api_key)  # type: ignore
+        kwargs = model_kwargs or {}
+        return ChatTongyi(model=name, api_key=self.api_key, model_kwargs=kwargs)  # type: ignore
 
     async def generate_response(
         self,
         messages: List[Dict[str, str]],
         system_prompt: str = "your are a helpful assistant",
         model_name: str | None = None,
+        model_kwargs: Dict[str, Any] | None = None,
     ) -> str:
         """
         生成AI回复
@@ -68,7 +74,7 @@ class AIService:
                 langchain_messages.append(AIMessage(content=msg["content"]))
 
         # 调用AI生成回复（保持同步调用以尽量兼容现有行为）
-        model = self._get_model(model_name)
+        model = self._get_model(model_name, model_kwargs=model_kwargs)
         response = model.invoke(langchain_messages)
 
         return normalize_message_content(response.content)
@@ -78,7 +84,8 @@ class AIService:
         messages: List[Dict[str, str]],
         system_prompt: str = "your are a helpful assistant",
         model_name: str | None = None,
-    ) -> AsyncGenerator[str, None]:
+        model_kwargs: Dict[str, Any] | None = None,
+    ) -> AsyncGenerator[Dict[str, str], None]:
         """
         流式生成AI回复，按 token/chunk 逐步 yield 内容。
 
@@ -100,11 +107,14 @@ class AIService:
             elif msg["role"] == "assistant":
                 langchain_messages.append(AIMessage(content=msg["content"]))
 
-        model = self._get_model(model_name)
+        model = self._get_model(model_name, model_kwargs=model_kwargs)
         async for chunk in model.astream(langchain_messages):
+            reasoning_text = _extract_reasoning_content(chunk)
+            if reasoning_text:
+                yield {"type": "reasoning_chunk", "content": reasoning_text}
             text = normalize_message_content(chunk.content)
             if text:
-                yield text
+                yield {"type": "chunk", "content": text}
 
     async def generate_short_title(self, user_question: str) -> str:
         """
@@ -127,3 +137,29 @@ class AIService:
 # 工厂函数，用于创建AIService实例
 def create_ai_service(api_key: str, model_name: str = "qwen-plus") -> AIService:
     return AIService(api_key=api_key, model_name=model_name)
+
+
+def _extract_reasoning_content(chunk: Any) -> str:
+    """尽量从 chunk 的不同字段中提取 reasoning_content。"""
+    direct = getattr(chunk, "reasoning_content", None)
+    if isinstance(direct, str) and direct:
+        return direct
+
+    additional_kwargs = getattr(chunk, "additional_kwargs", None)
+    if isinstance(additional_kwargs, dict):
+        rc = additional_kwargs.get("reasoning_content")
+        if isinstance(rc, str) and rc:
+            return rc
+
+    response_metadata = getattr(chunk, "response_metadata", None)
+    if isinstance(response_metadata, dict):
+        rc = response_metadata.get("reasoning_content")
+        if isinstance(rc, str) and rc:
+            return rc
+        generation_info = response_metadata.get("generation_info")
+        if isinstance(generation_info, dict):
+            rc = generation_info.get("reasoning_content")
+            if isinstance(rc, str) and rc:
+                return rc
+
+    return ""

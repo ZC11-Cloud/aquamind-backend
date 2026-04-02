@@ -97,6 +97,7 @@ async def send_message(
         conversation_id=message.conversation_id,
         role=message.role,
         content=message.content,
+        reasoning_content=message.reasoning_content,
         image_url=message.image_url,
         citations=message.citations,
         create_time=message.create_time,

@@ -78,8 +78,14 @@ class AgentService:
         self._tools = create_agent_tools(knowledge_service, yolo_service)
         self._tools_by_name = {t.name: t for t in self._tools}
 
-    def _model_with_tools(self, model_name: Optional[str] = None):
-        return self.ai_service._get_model(model_name).bind_tools(self._tools)
+    def _model_with_tools(
+        self,
+        model_name: Optional[str] = None,
+        model_kwargs: Optional[Dict[str, Any]] = None,
+    ):
+        return self.ai_service._get_model(
+            model_name, model_kwargs=model_kwargs
+        ).bind_tools(self._tools)
 
     @staticmethod
     def _as_data_url(image_base64: str) -> str:
@@ -95,6 +101,7 @@ class AgentService:
         system_prompt: Optional[str] = None,
         inject_messages: Optional[List[BaseMessage]] = None,
         model_name: Optional[str] = None,
+        model_kwargs: Optional[Dict[str, Any]] = None,
         image_base64: Optional[str] = None,
     ) -> AsyncGenerator[str, None]:
         """
@@ -124,7 +131,7 @@ class AgentService:
         else:
             langchain_messages.append(HumanMessage(content=current_user_content))
 
-        model = self._model_with_tools(model_name)
+        model = self._model_with_tools(model_name, model_kwargs=model_kwargs)
         response: Optional[BaseMessage] = None
         max_iterations = 10
         iteration = 0

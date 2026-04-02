@@ -21,6 +21,7 @@ class QaMessage(Base):
     conversation_id: Mapped[int] = mapped_column(Integer, nullable=False)
     role: Mapped[str] = mapped_column(Enum('user', 'assistant'), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
+    reasoning_content: Mapped[str | None] = mapped_column(Text, nullable=True)
     image_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
     citations: Mapped[list | None] = mapped_column(JSON, nullable=True, default=None)
     create_time: Mapped[datetime] = mapped_column(DateTime, server_default=text('CURRENT_TIMESTAMP'))
