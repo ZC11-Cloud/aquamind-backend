@@ -367,7 +367,7 @@ class QaService:
                     "本次流式回答使用 Agent, conversation_id=%s",
                     conversation_id,
                 )
-                async for chunk in self.agent_service.run_agent_stream(
+                async for event in self.agent_service.run_agent_stream(
                     messages_history=messages_history,
                     current_user_content=current_user_content,
                     model_name=model_name,
@@ -376,8 +376,23 @@ class QaService:
                 ):
                     if cancel_event and cancel_event.is_set():
                         raise asyncio.CancelledError
-                    full_content.append(chunk)
-                    yield chunk
+                    if isinstance(event, dict):
+                        event_type = event.get("type")
+                        if event_type == "reasoning_chunk":
+                            reasoning_chunk = event.get("content", "")
+                            if reasoning_chunk:
+                                full_reasoning.append(reasoning_chunk)
+                                yield event
+                            continue
+                        text_chunk = event.get("content", "")
+                        if text_chunk:
+                            full_content.append(text_chunk)
+                            yield event
+                        continue
+                    # 兼容旧的字符串事件
+                    if event:
+                        full_content.append(event)
+                        yield event
             elif use_rag:
                 logger.info(
                     "本次流式回答使用知识库 (RAG), conversation_id=%s", conversation_id
@@ -598,6 +613,10 @@ class QaService:
         preserve_thinking = getattr(message_data, "preserve_thinking", None)
         if enable_thinking is not None:
             kwargs["enable_thinking"] = bool(enable_thinking)
+            # DashScope 约束：流式模式下启用思考时，必须显式传 incremental_output=true。
+            # 这里统一补齐，避免 Agent/普通流式分支漏传导致 400 InvalidParameter。
+            if kwargs["enable_thinking"]:
+                kwargs["incremental_output"] = True
         if thinking_budget is not None:
             kwargs["thinking_budget"] = int(thinking_budget)
         if preserve_thinking is not None:

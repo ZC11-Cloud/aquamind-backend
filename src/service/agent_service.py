@@ -32,6 +32,32 @@ DEFAULT_AGENT_SYSTEM_PROMPT = """你是一个水生生物智能助手（AquaMind
 请根据用户意图决定是否调用工具。若用户仅做一般对话，可直接回答；若需要专业知识或识图，请先调用相应工具再综合回答。"""
 
 
+def _extract_reasoning_content(chunk: Any) -> str:
+    """尽量从 chunk 的不同字段中提取 reasoning_content。"""
+    direct = getattr(chunk, "reasoning_content", None)
+    if isinstance(direct, str) and direct:
+        return direct
+
+    additional_kwargs = getattr(chunk, "additional_kwargs", None)
+    if isinstance(additional_kwargs, dict):
+        rc = additional_kwargs.get("reasoning_content")
+        if isinstance(rc, str) and rc:
+            return rc
+
+    response_metadata = getattr(chunk, "response_metadata", None)
+    if isinstance(response_metadata, dict):
+        rc = response_metadata.get("reasoning_content")
+        if isinstance(rc, str) and rc:
+            return rc
+        generation_info = response_metadata.get("generation_info")
+        if isinstance(generation_info, dict):
+            rc = generation_info.get("reasoning_content")
+            if isinstance(rc, str) and rc:
+                return rc
+
+    return ""
+
+
 def _dict_to_langchain_messages(messages_history: List[Dict[str, str]]) -> List[BaseMessage]:
     """将 [{"role":"user"|"assistant","content":"..."}] 转为 LangChain 消息列表。"""
     out: List[BaseMessage] = []
@@ -103,9 +129,11 @@ class AgentService:
         model_name: Optional[str] = None,
         model_kwargs: Optional[Dict[str, Any]] = None,
         image_base64: Optional[str] = None,
-    ) -> AsyncGenerator[str, None]:
+    ) -> AsyncGenerator[Dict[str, str], None]:
         """
-        运行 Agent 循环，流式 yield 最终回复的每个 chunk。
+        运行 Agent 循环，流式产出事件：
+        - {"type":"reasoning_chunk","content":"..."}
+        - {"type":"chunk","content":"..."}
         messages_history: 历史对话 [{"role","content"}]
         current_user_content: 当前轮用户输入（可含注入的上下文描述）
         system_prompt: 系统提示，默认 DEFAULT_AGENT_SYSTEM_PROMPT
@@ -143,10 +171,13 @@ class AgentService:
             async for chunk in model.astream(langchain_messages):
                 if not isinstance(chunk, AIMessageChunk):
                     continue
+                reasoning_text = _extract_reasoning_content(chunk)
+                if reasoning_text:
+                    yield {"type": "reasoning_chunk", "content": reasoning_text}
                 # 真流式：有文本内容就立即 yield
                 text = normalize_message_content(chunk.content)
                 if text:
-                    yield text
+                    yield {"type": "chunk", "content": text}
                 accumulated = chunk if accumulated is None else accumulated + chunk
 
             response = accumulated
@@ -177,7 +208,7 @@ class AgentService:
                 langchain_messages.append(ToolMessage(content=content, tool_call_id=tid))
 
         if response is None:
-            yield "抱歉，未能生成回复。"
+            yield {"type": "chunk", "content": "抱歉，未能生成回复。"}
             return
 
 
