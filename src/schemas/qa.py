@@ -74,3 +74,8 @@ class QaMessageListResponse(BaseModel):
 class QaConversationTitleResponse(BaseModel):
     """生成标题响应模型"""
     title: str
+
+
+class QaSuggestionsResponse(BaseModel):
+    """追问建议响应模型"""
+    suggestions: List[str]

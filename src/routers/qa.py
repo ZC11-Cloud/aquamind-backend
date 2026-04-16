@@ -17,9 +17,10 @@ from src.schemas.qa import (
     QaConversationResponse,
     QaConversationListResponse,
     QaConversationTitleResponse,
+    QaSuggestionsResponse,
     QaMessageCreate,
     QaMessageResponse,
-    QaMessageListResponse
+    QaMessageListResponse,
 )
 from src.service.qa_service import QaService
 from src.service.ai_service import create_ai_service
@@ -258,6 +259,34 @@ async def generate_conversation_title(
             detail="不满足生成条件（会话不存在、消息数非 2、或标题已非「新对话」）",
         )
     return QaConversationTitleResponse(title=title)
+
+
+@router.get(
+    "/conversations/{conversation_id}/suggestions",
+    response_model=QaSuggestionsResponse,
+)
+async def get_suggestions(
+    conversation_id: int,
+    message_id: int | None = None,
+    limit: int = 3,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """获取与当前上下文相关的追问建议。"""
+    qa_service = _get_qa_service(session)
+    try:
+        suggestions = await qa_service.get_suggestions(
+            conversation_id=conversation_id,
+            user_id=current_user.id,
+            message_id=message_id,
+            limit=limit,
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e),
+        ) from e
+    return QaSuggestionsResponse(suggestions=suggestions)
 
 
 @router.delete("/conversations/{conversation_id}", status_code=status.HTTP_204_NO_CONTENT)

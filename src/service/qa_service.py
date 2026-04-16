@@ -1,6 +1,8 @@
 import asyncio
 import base64
+import json
 import logging
+import re
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy import func, delete, update
@@ -21,6 +23,66 @@ from src.settings import UPLOAD_DIR
 from src.utils.qa_image import save_qa_image_base64_to_file
 
 logger = logging.getLogger(__name__)
+DEFAULT_SUGGESTION_LIMIT = 3
+MAX_SUGGESTION_LIMIT = 5
+FALLBACK_SUGGESTIONS = [
+    "你可以用一个更简单的例子再解释一次吗？",
+    "如果我要立刻执行，下一步最先做什么？",
+    "这个方案有哪些常见误区需要避免？",
+    "请给我一个分步骤的检查清单。",
+    "还有哪些可选方案，分别适合什么场景？",
+]
+
+
+def _normalize_suggestion_text(text: str) -> str:
+    value = (text or "").strip()
+    value = re.sub(r"^\s*(?:[-*•]|\d+[\.、\)]|[（(]?\d+[）)])\s*", "", value)
+    value = value.replace("`", "")
+    value = re.sub(r"\[(.*?)\]\((.*?)\)", r"\1", value)
+    value = re.sub(r"[#>*_~]", "", value)
+    value = re.sub(r"\s+", " ", value).strip()
+    if len(value) > 60:
+        value = value[:60].rstrip("，。！？!?,;； ") + "？"
+    return value
+
+
+def _extract_suggestions_from_llm(raw_content: str) -> List[str]:
+    if not raw_content:
+        return []
+
+    candidates: List[str] = []
+    content = raw_content.strip()
+
+    parsed = None
+    try:
+        parsed = json.loads(content)
+    except Exception:
+        match = re.search(r"\[[\s\S]*\]", content)
+        if match:
+            try:
+                parsed = json.loads(match.group(0))
+            except Exception:
+                parsed = None
+
+    if isinstance(parsed, list):
+        candidates = [str(item) for item in parsed]
+    elif isinstance(parsed, dict) and isinstance(parsed.get("suggestions"), list):
+        candidates = [str(item) for item in parsed["suggestions"]]
+    else:
+        candidates = [line.strip() for line in content.splitlines() if line.strip()]
+
+    normalized: List[str] = []
+    seen: set[str] = set()
+    for item in candidates:
+        cleaned = _normalize_suggestion_text(item)
+        if not cleaned:
+            continue
+        lowered = cleaned.lower()
+        if lowered in seen:
+            continue
+        seen.add(lowered)
+        normalized.append(cleaned)
+    return normalized
 
 if TYPE_CHECKING:
     from src.service.rag_service import RAGService
@@ -428,6 +490,105 @@ class QaService:
                 )
             # 流式协议：最后 yield done 事件，携带 citations 供前端 Sources 使用
             yield {"type": "done", "citations": stream_citations}
+
+    @staticmethod
+    def _fallback_suggestions(limit: int) -> List[str]:
+        return FALLBACK_SUGGESTIONS[:limit]
+
+    async def get_suggestions(
+        self,
+        conversation_id: int,
+        user_id: int,
+        message_id: Optional[int] = None,
+        limit: int = DEFAULT_SUGGESTION_LIMIT,
+    ) -> List[str]:
+        capped_limit = max(1, min(limit, MAX_SUGGESTION_LIMIT))
+
+        async with self.session.begin():
+            conversation_stmt = select(QaConversation).where(
+                QaConversation.id == conversation_id,
+                QaConversation.user_id == user_id,
+            )
+            conversation_result = await self.session.execute(conversation_stmt)
+            conversation = conversation_result.scalar_one_or_none()
+            if not conversation:
+                raise ValueError("会话不存在或不属于该用户")
+
+            if message_id is not None:
+                assistant_stmt = (
+                    select(QaMessage)
+                    .where(
+                        QaMessage.id == message_id,
+                        QaMessage.conversation_id == conversation_id,
+                        QaMessage.role == "assistant",
+                    )
+                    .limit(1)
+                )
+            else:
+                assistant_stmt = (
+                    select(QaMessage)
+                    .where(
+                        QaMessage.conversation_id == conversation_id,
+                        QaMessage.role == "assistant",
+                    )
+                    .order_by(QaMessage.create_time.desc(), QaMessage.id.desc())
+                    .limit(1)
+                )
+            assistant_result = await self.session.execute(assistant_stmt)
+            target_assistant = assistant_result.scalar_one_or_none()
+
+            if not target_assistant or not (target_assistant.content or "").strip():
+                return self._fallback_suggestions(capped_limit)
+
+            recent_stmt = (
+                select(QaMessage)
+                .where(QaMessage.conversation_id == conversation_id)
+                .order_by(QaMessage.create_time.desc(), QaMessage.id.desc())
+                .limit(8)
+            )
+            recent_result = await self.session.execute(recent_stmt)
+            recent_messages = list(recent_result.scalars().all())
+
+        recent_messages.reverse()
+        context_lines: List[str] = []
+        for msg in recent_messages:
+            text = (msg.content or "").strip()
+            if not text:
+                continue
+            role = "用户" if msg.role == "user" else "助手"
+            context_lines.append(f"{role}: {text[:600]}")
+
+        if not context_lines:
+            context_lines.append(f"助手: {(target_assistant.content or '').strip()[:600]}")
+
+        prompt = (
+            f"基于以下对话上下文，生成 {capped_limit} 个下一轮建议问题。\n"
+            "要求：\n"
+            "1) 与上下文强相关；\n"
+            "2) 句子简短、可直接提问；\n"
+            "3) 不要重复，不要解释，不要输出答案；\n"
+            "4) 输出 JSON 数组字符串，例如：[\"问题1\",\"问题2\"]。\n\n"
+            "对话上下文：\n"
+            f"{chr(10).join(context_lines)}"
+        )
+
+        try:
+            raw = await self.ai_service.generate_response(
+                messages=[{"role": "user", "content": prompt}],
+                system_prompt=(
+                    "你是一个追问建议生成器。"
+                    "你只负责根据上下文产出可点击的问题建议，"
+                    "必须输出 JSON 数组，不要输出其它文本。"
+                ),
+            )
+        except Exception as e:
+            logger.warning("生成追问建议失败，使用兜底建议: %s", e, exc_info=True)
+            return self._fallback_suggestions(capped_limit)
+
+        suggestions = _extract_suggestions_from_llm(raw)
+        if not suggestions:
+            return self._fallback_suggestions(capped_limit)
+        return suggestions[:capped_limit]
 
     @staticmethod
     def _build_model_kwargs(message_data: QaMessageCreate) -> Dict[str, Any]:
