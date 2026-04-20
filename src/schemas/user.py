@@ -40,6 +40,12 @@ class UserInfo(BaseModel):
         from_attributes = True
         use_enum_values = True
 
+class UserProfileUpdate(BaseModel):
+    """用户可更新的个人资料字段"""
+    real_name: str | None = None
+    phone: PhoneStr
+    email: EmailStr | None = None
+
 class UserPasswordChange(BaseModel):
     """用户密码修改模型"""
     username: UsernameStr

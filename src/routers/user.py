@@ -8,16 +8,31 @@ from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.dependencies import get_session, get_current_user
-from src.models import user
 from src.models.user import User
 from src.schemas.response import ResponseSchema
-from src.schemas.user import UserRegister, UserLogin, Token, UserInfo, UserPasswordChange
+from src.schemas.user import (
+    UserRegister,
+    UserLogin,
+    Token,
+    UserInfo,
+    UserPasswordChange,
+    UserProfileUpdate,
+)
 from src.service.user_service import UserService
 from src.settings import ACCESS_TOKEN_EXPIRE_MINUTES, UPLOAD_DIR
 from src.utils.security import create_access_token
 
 router = APIRouter(prefix="/user", tags=["user"])
 logger = logging.getLogger(__name__)
+
+
+def _build_user_info(user_obj: User) -> UserInfo:
+    user_info = UserInfo.model_validate(user_obj)
+    if user_obj.avatar_bucket and user_obj.avatar_object_key:
+        user_info.avatar_url = f"/user/avatar/{user_obj.id}"
+    return user_info
+
+
 @router.post("/register", response_model=ResponseSchema)
 async def register(
         user: UserRegister,
@@ -69,7 +84,7 @@ async def read_users_me(
         current_user: User = Depends(get_current_user)
 ):
     """获取当前登录用户信息"""
-    user_info = UserInfo.model_validate(current_user)
+    user_info = _build_user_info(current_user)
     return ResponseSchema(
         result="success",
         code=200,
@@ -100,26 +115,26 @@ async def change_password(
 
 @router.put("/me", response_model=ResponseSchema)
 async def update_user(
-        user_update: UserInfo,
+        user_update: UserProfileUpdate,
         current_user: User = Depends(get_current_user),
         session: AsyncSession = Depends(get_session)
 ):
     """更新当前登录用户信息"""
-    # 1. 权限检查： 普通用户只能更新自己，管理员可以更新所有人
-    if current_user.role != 1 and user_update.id != current_user.id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to update this user")
-
-    # 2. 普通用户不能修改自己的角色和状态
-    if current_user.role != 1:
-        user_update.role = current_user.role
-        user_update.status = current_user.status
-
-    # 3.更新用户信息
+    # 1. 更新用户信息
     user_service = UserService(session)
-    updated = await user_service.update_user(user_update)
+    updated = await user_service.update_user_profile(current_user.id, user_update)
     if not updated:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-    return ResponseSchema(result="success", code=200, message="User updated success")
+    refreshed_user = await user_service.get_user_by_id(current_user.id)
+    if not refreshed_user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    user_info = _build_user_info(refreshed_user)
+    return ResponseSchema(
+        result="success",
+        code=200,
+        message="User updated success",
+        data=user_info.model_dump(),
+    )
 
 
 @router.get("/{user_id}", response_model=ResponseSchema)
@@ -137,7 +152,7 @@ async def get_user_info(
     user = await user_service.get_user_by_id(user_id)
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-    user_info = UserInfo.model_validate(user)
+    user_info = _build_user_info(user)
     return ResponseSchema(result="success", code=200, message="User info retrieved success", data=user_info.model_dump())
 
 
