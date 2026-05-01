@@ -97,6 +97,19 @@ def _parse_llm_enrichment(text: str) -> Tuple[Optional[str], Optional[str]]:
         name = name.split("\n")[0].strip()
     if desc:
         desc = desc.split("\n")[0].strip()
+    if not desc:
+        # 兜底：当模型未严格按“简短描述：”格式输出时，尽量从首行文本提取可展示说明
+        lines = [line.strip(" -*\t") for line in text.splitlines() if line.strip()]
+        candidate_lines: List[str] = []
+        for line in lines:
+            normalized = line.replace("：", ":")
+            if normalized.startswith("中文名称:") or normalized.startswith("简短描述:"):
+                continue
+            if line == name:
+                continue
+            candidate_lines.append(line)
+        if candidate_lines:
+            desc = candidate_lines[0]
     return name, desc
 
 
@@ -118,6 +131,9 @@ async def _enrich_detections_with_llm(raw_detections: List[dict]) -> List[dict]:
             system_prompt=system_prompt,
         )
         name_zh, desc = _parse_llm_enrichment(response)
+        if not desc and response.strip():
+            # 二次兜底：即使解析失败，也尽量保留可读的模型解释文本
+            desc = response.strip().split("\n")[0][:200]
         result = []
         for d in raw_detections:
             item = {**d, "species_name_zh": None, "description": None}
