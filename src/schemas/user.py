@@ -1,6 +1,8 @@
-from typing import Annotated
+from datetime import datetime
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field, EmailStr
+from src.models.user import NORMAL_ROLE, ACTIVE_STATUS
 
 UsernameStr = Annotated[str, Field(..., min_length=3, max_length=50)]
 PasswordStr = Annotated[str, Field(..., min_length=6, max_length=100)]
@@ -51,3 +53,32 @@ class UserPasswordChange(BaseModel):
     username: UsernameStr
     password: PasswordStr
     new_password: PasswordStr
+
+
+class AdminUserCreate(UserRegister):
+    """管理员创建用户模型。"""
+    role: Literal[0, 1] = NORMAL_ROLE
+    status: Literal[0, 1] = ACTIVE_STATUS
+
+
+class AdminUserUpdate(BaseModel):
+    """管理员更新用户基础资料模型。"""
+    real_name: str | None = None
+    phone: PhoneStr
+    email: EmailStr | None = None
+
+
+class AdminUserStatusUpdate(BaseModel):
+    """管理员更新用户状态模型。"""
+    status: Literal[0, 1]
+
+
+class AdminUserRoleUpdate(BaseModel):
+    """管理员更新用户角色模型。"""
+    role: Literal[0, 1]
+
+
+class AdminUserListItem(UserInfo):
+    """管理员端用户列表项。"""
+    create_time: datetime
+    update_time: datetime

@@ -3,12 +3,12 @@ import os
 import uuid
 from datetime import timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Query
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.dependencies import get_session, get_current_user
-from src.models.user import User
+from src.dependencies import get_session, get_current_user, require_admin
+from src.models.user import User, ADMIN_ROLE, NORMAL_ROLE, DISABLED_STATUS
 from src.schemas.response import ResponseSchema
 from src.schemas.user import (
     UserRegister,
@@ -17,6 +17,11 @@ from src.schemas.user import (
     UserInfo,
     UserPasswordChange,
     UserProfileUpdate,
+    AdminUserCreate,
+    AdminUserUpdate,
+    AdminUserStatusUpdate,
+    AdminUserRoleUpdate,
+    AdminUserListItem,
 )
 from src.service.user_service import UserService
 from src.settings import ACCESS_TOKEN_EXPIRE_MINUTES, UPLOAD_DIR
@@ -28,6 +33,13 @@ logger = logging.getLogger(__name__)
 
 def _build_user_info(user_obj: User) -> UserInfo:
     user_info = UserInfo.model_validate(user_obj)
+    if user_obj.avatar_bucket and user_obj.avatar_object_key:
+        user_info.avatar_url = f"/user/avatar/{user_obj.id}"
+    return user_info
+
+
+def _build_admin_user_item(user_obj: User) -> AdminUserListItem:
+    user_info = AdminUserListItem.model_validate(user_obj)
     if user_obj.avatar_bucket and user_obj.avatar_object_key:
         user_info.avatar_url = f"/user/avatar/{user_obj.id}"
     return user_info
@@ -137,17 +149,190 @@ async def update_user(
     )
 
 
+@router.get("/admin/list", response_model=ResponseSchema)
+async def list_users_by_admin(
+        page: int = Query(1, ge=1),
+        page_size: int = Query(10, ge=1, le=100),
+        keyword: str | None = Query(None, max_length=50),
+        current_user: User = Depends(require_admin),
+        session: AsyncSession = Depends(get_session)
+):
+    """管理员分页获取用户列表。"""
+    _ = current_user
+    user_service = UserService(session)
+    users, total = await user_service.list_users(page=page, page_size=page_size, keyword=keyword)
+    items = [_build_admin_user_item(user).model_dump() for user in users]
+    return ResponseSchema(
+        result="success",
+        code=200,
+        message="User list retrieved success",
+        data={
+            "items": items,
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+        },
+    )
+
+
+@router.get("/admin/{user_id}", response_model=ResponseSchema)
+async def get_user_info_by_admin(
+        user_id: int,
+        current_user: User = Depends(require_admin),
+        session: AsyncSession = Depends(get_session)
+):
+    """管理员获取指定用户详情。"""
+    _ = current_user
+    user_service = UserService(session)
+    user = await user_service.get_user_by_id(user_id)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    user_info = _build_admin_user_item(user)
+    return ResponseSchema(
+        result="success",
+        code=200,
+        message="User info retrieved success",
+        data=user_info.model_dump(),
+    )
+
+
+@router.post("/admin", response_model=ResponseSchema)
+async def add_user_by_admin(
+        user: AdminUserCreate,
+        current_user: User = Depends(require_admin),
+        session: AsyncSession = Depends(get_session)
+):
+    """管理员新增用户。"""
+    _ = current_user
+    user_service = UserService(session)
+    added = await user_service.create_user_by_admin(user)
+    if not added:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Username already exists")
+    return ResponseSchema(result="success", code=200, message="User added success")
+
+
+@router.put("/admin/{user_id}", response_model=ResponseSchema)
+async def update_user_by_admin(
+        user_id: int,
+        user_update: AdminUserUpdate,
+        current_user: User = Depends(require_admin),
+        session: AsyncSession = Depends(get_session)
+):
+    """管理员更新用户基础信息。"""
+    _ = current_user
+    user_service = UserService(session)
+    updated_user = await user_service.update_user_by_admin(user_id=user_id, user_data=user_update)
+    if not updated_user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    user_info = _build_admin_user_item(updated_user)
+    return ResponseSchema(
+        result="success",
+        code=200,
+        message="User updated success",
+        data=user_info.model_dump(),
+    )
+
+
+@router.patch("/admin/{user_id}/status", response_model=ResponseSchema)
+async def update_user_status_by_admin(
+        user_id: int,
+        payload: AdminUserStatusUpdate,
+        current_user: User = Depends(require_admin),
+        session: AsyncSession = Depends(get_session)
+):
+    """管理员更新用户状态。"""
+    user_service = UserService(session)
+    target_user = await user_service.get_user_by_id(user_id)
+    if not target_user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    if target_user.id == current_user.id and payload.status == DISABLED_STATUS:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot disable current admin account")
+
+    if target_user.role == ADMIN_ROLE and payload.status == DISABLED_STATUS:
+        admin_count = await user_service.count_admin_users()
+        if admin_count <= 1:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot disable the last admin")
+
+    updated_user = await user_service.update_user_status(user_id=user_id, status_value=payload.status)
+    if not updated_user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    user_info = _build_admin_user_item(updated_user)
+    return ResponseSchema(
+        result="success",
+        code=200,
+        message="User status updated success",
+        data=user_info.model_dump(),
+    )
+
+
+@router.patch("/admin/{user_id}/role", response_model=ResponseSchema)
+async def update_user_role_by_admin(
+        user_id: int,
+        payload: AdminUserRoleUpdate,
+        current_user: User = Depends(require_admin),
+        session: AsyncSession = Depends(get_session)
+):
+    """管理员更新用户角色。"""
+    user_service = UserService(session)
+    target_user = await user_service.get_user_by_id(user_id)
+    if not target_user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    if target_user.id == current_user.id and payload.role == NORMAL_ROLE:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot demote current admin account")
+
+    if target_user.role == ADMIN_ROLE and payload.role == NORMAL_ROLE:
+        admin_count = await user_service.count_admin_users()
+        if admin_count <= 1:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot demote the last admin")
+
+    updated_user = await user_service.update_user_role(user_id=user_id, role_value=payload.role)
+    if not updated_user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    user_info = _build_admin_user_item(updated_user)
+    return ResponseSchema(
+        result="success",
+        code=200,
+        message="User role updated success",
+        data=user_info.model_dump(),
+    )
+
+
+@router.delete("/admin/{user_id}", response_model=ResponseSchema)
+async def delete_user_by_admin(
+        user_id: int,
+        current_user: User = Depends(require_admin),
+        session: AsyncSession = Depends(get_session)
+):
+    """管理员删除用户。"""
+    user_service = UserService(session)
+    target_user = await user_service.get_user_by_id(user_id)
+    if not target_user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    if target_user.id == current_user.id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot delete current admin account")
+
+    if target_user.role == ADMIN_ROLE:
+        admin_count = await user_service.count_admin_users()
+        if admin_count <= 1:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot delete the last admin")
+
+    deleted = await user_service.delete_user(user_id)
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    return ResponseSchema(result="success", code=200, message="User deleted success")
+
+
 @router.get("/{user_id}", response_model=ResponseSchema)
 async def get_user_info(
         user_id: int,
-        current_user: User = Depends(get_current_user),
+        current_user: User = Depends(require_admin),
         session: AsyncSession = Depends(get_session)
 ):
-    """获取指定用户详细信息（管理员权限）"""
-    # 1. 权限检查： 只有管理员可以查询其他用户信息
-    if current_user.role != 1:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to view this user")
-    # 2. 查询用户
+    """兼容旧版路径：管理员获取指定用户详细信息。"""
+    _ = current_user
     user_service = UserService(session)
     user = await user_service.get_user_by_id(user_id)
     if not user:
@@ -159,14 +344,11 @@ async def get_user_info(
 @router.post("", response_model=ResponseSchema)
 async def add_user(
         user: UserRegister,
-        current_user: User = Depends(get_current_user),
+        current_user: User = Depends(require_admin),
         session: AsyncSession = Depends(get_session)
 ):
-    """添加新用户（管理员权限）"""
-    # 1. 权限检查： 只有管理员可以添加用户
-    if current_user.role != 1:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to add user")
-    # 2. 添加用户
+    """兼容旧版路径：管理员新增普通用户。"""
+    _ = current_user
     user_service = UserService(session)
     added = await user_service.register_user(user)
     if not added:
@@ -234,7 +416,7 @@ async def get_avatar(
 ):
     """获取用户头像"""
     # 1. 权限检查： 普通用户只能查询自己，管理员可以查询所有用户
-    if current_user.role != 1 and user_id != current_user.id:
+    if current_user.role != ADMIN_ROLE and user_id != current_user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not authorized to view this user avatar")
