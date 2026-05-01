@@ -1,0 +1,40 @@
+project:
+  name: AquaMind RAG
+  version: 1.0
+  test_window_days: 9
+
+environment:
+  base_url: http://127.0.0.1:8000
+  python: "3.x"
+  os: windows
+  db: mysql
+  vector_store: chromadb
+  llm_provider: dashscope
+
+acceptance:
+  functional_pass_rate_min: 0.95
+  avg_latency_seconds_max: 2.5
+  p95_latency_seconds_max: 4.5
+  stability_error_rate_max: 0.01
+  stability_crash_count_max: 0
+
+test_account:
+  username: test_rag_user
+  password: Test123456
+  real_name: RAG Tester
+  phone: "13800000000"
+  email: test_rag_user@example.com
+
+functional:
+  timeout_seconds: 60
+  conversation_title: 系统测试会话
+
+performance:
+  user_levels: [10, 30, 50]
+  duration_minutes: 10
+  spawn_rate: [2, 5, 8]
+
+stability:
+  concurrency: 20
+  duration_hours: 8
+  sample_interval_minutes: 30

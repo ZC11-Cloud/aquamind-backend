@@ -4,9 +4,10 @@
 """
 import os
 import logging
+import time
 from collections import defaultdict
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Dict
 
 from langchain_core.documents import Document
 try:
@@ -32,6 +33,7 @@ DEFAULT_COLLECTION_NAME = "aquamind_kb"
 
 # 简介截取长度（字符数，用于前端展示）
 SUMMARY_SNIPPET_LENGTH = 300
+SOURCE_COUNT_CACHE_TTL_SECONDS = 30
 
 # 支持的文档后缀与 Loader 映射（按需扩展）
 LOADER_MAP = {
@@ -74,6 +76,17 @@ class KnowledgeService:
             length_function=len,
             separators=["\n\n", "\n", "。", "！", "？", "；", " ", ""],
         )
+        self._source_count_cache: dict[str, int] = {}
+        self._source_count_cache_at = 0.0
+
+    def _invalidate_source_count_cache(self) -> None:
+        self._source_count_cache = {}
+        self._source_count_cache_at = 0.0
+
+    def _is_source_count_cache_valid(self) -> bool:
+        if not self._source_count_cache:
+            return False
+        return (time.time() - self._source_count_cache_at) <= SOURCE_COUNT_CACHE_TTL_SECONDS
 
     def _get_loader(self, file_path: str):
         """根据文件后缀返回对应 Loader 类；不支持则返回 None。"""
@@ -123,6 +136,7 @@ class KnowledgeService:
             return 0, snippet
         ids = [f"{source}_{i}" for i in range(len(splits))]
         self._vector_store.add_documents(splits, ids=ids)
+        self._invalidate_source_count_cache()
         logger.info("知识库写入完成: source=%s, chunks=%d", source, len(splits))
         return len(splits), snippet
 
@@ -151,16 +165,23 @@ class KnowledgeService:
             logger.info("未找到 source=%s 的文档", source_id)
             return 0
         self._vector_store.delete(ids=ids)
+        self._invalidate_source_count_cache()
         logger.info("知识库删除完成: source=%s, chunks=%d", source_id, len(ids))
         return len(ids)
 
-    def list_document_sources(self, limit: int = 10000) -> List[dict]:
+    def list_document_sources(self, limit: int = 10000, force_refresh: bool = False) -> List[dict]:
         """
         列出当前 collection 中所有文档的 source_id 及对应 chunk 数（用于文档列表接口）。
 
         :param limit: 从 Chroma 拉取的最大条数，用于去重前采样。
         :return: [{"source_id": str, "chunk_count": int}, ...]
         """
+        if not force_refresh and self._is_source_count_cache_valid():
+            return [
+                {"source_id": sid, "chunk_count": cnt}
+                for sid, cnt in sorted(self._source_count_cache.items())
+            ]
+
         try:
             coll = self._vector_store._collection
         except AttributeError:
@@ -170,16 +191,32 @@ class KnowledgeService:
         try:
             res = coll.get(limit=limit, include=["metadatas"])
             metadatas = res.get("metadatas") or []
-            ids = res.get("ids") or []
         except Exception as e:
             logger.exception("Chroma list 失败: %s", e)
             return []
         # 按 source 聚合计数（id 形如 source_i）
-        count_by_source: dict = defaultdict(int)
+        count_by_source: Dict[str, int] = defaultdict(int)
         for meta in metadatas:
             if isinstance(meta, dict) and "source" in meta:
-                count_by_source[meta["source"]] += 1
+                count_by_source[str(meta["source"])] += 1
+        self._source_count_cache = dict(count_by_source)
+        self._source_count_cache_at = time.time()
         return [{"source_id": sid, "chunk_count": c} for sid, c in sorted(count_by_source.items())]
+
+    def get_chunk_count_map(
+        self,
+        source_ids: Optional[List[str]] = None,
+        limit: int = 10000,
+    ) -> Dict[str, int]:
+        """
+        获取 source_id -> chunk_count 映射。
+        source_ids 为空时返回全部；传入时仅返回目标 source 集合，减少上层重复遍历。
+        """
+        rows = self.list_document_sources(limit=limit)
+        full_map = {str(item["source_id"]): int(item["chunk_count"]) for item in rows}
+        if not source_ids:
+            return full_map
+        return {sid: full_map.get(sid, 0) for sid in source_ids}
 
     def get_document_content(self, file_path: str) -> str:
         """

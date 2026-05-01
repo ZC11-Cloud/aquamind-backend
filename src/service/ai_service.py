@@ -1,8 +1,11 @@
+import asyncio
+import json
 from typing import List, Dict, Any, AsyncGenerator
 from langchain.messages import HumanMessage, AIMessage, SystemMessage
 
 from src.service.dashscope_chat_tongyi import ChatTongyiDashScope
 from src.service.llm_content_utils import normalize_message_content
+from src.settings import AI_REQUEST_TIMEOUT_SECONDS
 
 import logging
 logger = logging.getLogger(__name__)
@@ -22,6 +25,17 @@ class AIService:
         """
         self.api_key = api_key
         self.default_model_name = model_name
+        self._model_cache: dict[str, ChatTongyi] = {}
+
+    @staticmethod
+    def _build_model_cache_key(
+        model_name: str,
+        model_kwargs: Dict[str, Any] | None = None,
+    ) -> str:
+        kwargs = model_kwargs or {}
+        # sort_keys 确保相同参数顺序产生稳定 key，便于模型实例复用
+        kwargs_key = json.dumps(kwargs, sort_keys=True, ensure_ascii=True)
+        return f"{model_name}::{kwargs_key}"
 
     @property
     def chat_model(self) -> ChatTongyi:
@@ -37,10 +51,15 @@ class AIService:
         根据传入的模型名获取 ChatTongyi 实例；未传或非法时回退到默认模型。
         """
         name = (model_name or self.default_model_name) or "qwen-plus"
-        # 这里直接按需创建实例，模型数量有限，性能影响可接受
-        logger.info(f"Getting model: {name}")
         kwargs = model_kwargs or {}
-        return ChatTongyi(model=name, api_key=self.api_key, model_kwargs=kwargs)  # type: ignore
+        cache_key = self._build_model_cache_key(name, kwargs)
+        cached = self._model_cache.get(cache_key)
+        if cached is not None:
+            return cached
+        model = ChatTongyi(model=name, api_key=self.api_key, model_kwargs=kwargs)  # type: ignore
+        self._model_cache[cache_key] = model
+        logger.info("模型实例已创建并缓存: %s", name)
+        return model
 
     async def generate_response(
         self,
@@ -73,9 +92,12 @@ class AIService:
             elif msg["role"] == "assistant":
                 langchain_messages.append(AIMessage(content=msg["content"]))
 
-        # 调用AI生成回复（保持同步调用以尽量兼容现有行为）
+        # invoke 为同步调用，放到线程池避免阻塞事件循环
         model = self._get_model(model_name, model_kwargs=model_kwargs)
-        response = model.invoke(langchain_messages)
+        response = await asyncio.wait_for(
+            asyncio.to_thread(model.invoke, langchain_messages),
+            timeout=AI_REQUEST_TIMEOUT_SECONDS,
+        )
 
         return normalize_message_content(response.content)
 

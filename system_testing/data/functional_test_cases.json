@@ -1,0 +1,358 @@
+[
+  {
+    "id": "F001",
+    "name": "创建会话_正常",
+    "category": "normal",
+    "method": "POST",
+    "endpoint": "/qa/conversations",
+    "payload": {"title": "系统测试会话"},
+    "auth_mode": "normal",
+    "expected_status": 201
+  },
+  {
+    "id": "F002",
+    "name": "发送RAG问题_定义类问题",
+    "category": "normal",
+    "method": "POST",
+    "endpoint": "/qa/conversations/{{conversation_id}}/messages",
+    "payload": {"content": "什么是蜻蜓稚虫", "use_rag": true},
+    "auth_mode": "normal",
+    "expected_status": 201,
+    "expect_non_empty_answer": true,
+    "expect_keywords_any": ["蜻蜓", "稚虫", "幼体"]
+  },
+  {
+    "id": "F003",
+    "name": "发送RAG问题_指示生物",
+    "category": "normal",
+    "method": "POST",
+    "endpoint": "/qa/conversations/{{conversation_id}}/messages",
+    "payload": {"content": "为什么蜉蝣稚虫可作为水质指示生物", "use_rag": true},
+    "auth_mode": "normal",
+    "expected_status": 201,
+    "expect_non_empty_answer": true,
+    "expect_keywords_any": ["蜉蝣", "水质", "指示"]
+  },
+  {
+    "id": "F004",
+    "name": "发送RAG问题_甲壳类特征",
+    "category": "normal",
+    "method": "POST",
+    "endpoint": "/qa/conversations/{{conversation_id}}/messages",
+    "payload": {"content": "甲壳类生物有哪些典型特征", "use_rag": true},
+    "auth_mode": "normal",
+    "expected_status": 201,
+    "expect_non_empty_answer": true,
+    "expect_keywords_any": ["甲壳", "外骨骼", "附肢"]
+  },
+  {
+    "id": "F005",
+    "name": "发送RAG问题_轮虫信息",
+    "category": "normal",
+    "method": "POST",
+    "endpoint": "/qa/conversations/{{conversation_id}}/messages",
+    "payload": {"content": "轮虫属于哪一类生物", "use_rag": true},
+    "auth_mode": "normal",
+    "expected_status": 201,
+    "expect_non_empty_answer": true,
+    "expect_keywords_any": ["轮虫", "浮游", "淡水"]
+  },
+  {
+    "id": "F006",
+    "name": "发送RAG问题_腹足类特征",
+    "category": "normal",
+    "method": "POST",
+    "endpoint": "/qa/conversations/{{conversation_id}}/messages",
+    "payload": {"content": "腹足类软体动物的代表特点是什么", "use_rag": true},
+    "auth_mode": "normal",
+    "expected_status": 201,
+    "expect_non_empty_answer": true,
+    "expect_keywords_any": ["腹足类", "软体", "肌肉足"]
+  },
+  {
+    "id": "F007",
+    "name": "发送RAG问题_检索作用",
+    "category": "normal",
+    "method": "POST",
+    "endpoint": "/qa/conversations/{{conversation_id}}/messages",
+    "payload": {"content": "RAG系统中的检索步骤作用是什么", "use_rag": true},
+    "auth_mode": "normal",
+    "expected_status": 201,
+    "expect_non_empty_answer": true,
+    "expect_keywords_any": ["检索", "召回", "依据"]
+  },
+  {
+    "id": "F008",
+    "name": "发送普通问答_不启用RAG",
+    "category": "normal",
+    "method": "POST",
+    "endpoint": "/qa/conversations/{{conversation_id}}/messages",
+    "payload": {"content": "请简要介绍你自己", "use_rag": false},
+    "auth_mode": "normal",
+    "expected_status": 201,
+    "expect_non_empty_answer": true
+  },
+  {
+    "id": "F009",
+    "name": "查看会话列表",
+    "category": "normal",
+    "method": "GET",
+    "endpoint": "/qa/conversations?skip=0&limit=10",
+    "auth_mode": "normal",
+    "expected_status": 200
+  },
+  {
+    "id": "F010",
+    "name": "查看消息列表",
+    "category": "normal",
+    "method": "GET",
+    "endpoint": "/qa/conversations/{{conversation_id}}/messages?skip=0&limit=50",
+    "auth_mode": "normal",
+    "expected_status": 200
+  },
+  {
+    "id": "F011",
+    "name": "获取追问建议",
+    "category": "normal",
+    "method": "GET",
+    "endpoint": "/qa/conversations/{{conversation_id}}/suggestions?limit=3",
+    "auth_mode": "normal",
+    "expected_status": 200
+  },
+  {
+    "id": "F012",
+    "name": "生成会话标题",
+    "category": "normal",
+    "method": "POST",
+    "endpoint": "/qa/conversations/{{conversation_id}}/generate-title",
+    "auth_mode": "normal",
+    "expected_status_any": [200, 400]
+  },
+  {
+    "id": "F013",
+    "name": "知识库搜索_正常关键词",
+    "category": "normal",
+    "method": "GET",
+    "endpoint": "/knowledge/search?q=轮虫&top_k=5",
+    "auth_mode": "normal",
+    "expected_status": 200
+  },
+  {
+    "id": "F014",
+    "name": "知识库文档列表",
+    "category": "normal",
+    "method": "GET",
+    "endpoint": "/knowledge/documents?page=1&page_size=10",
+    "auth_mode": "normal",
+    "expected_status": 200
+  },
+  {
+    "id": "F015",
+    "name": "查看当前用户信息",
+    "category": "normal",
+    "method": "GET",
+    "endpoint": "/user/me",
+    "auth_mode": "normal",
+    "expected_status": 200
+  },
+  {
+    "id": "F016",
+    "name": "发送长文本问题",
+    "category": "boundary",
+    "method": "POST",
+    "endpoint": "/qa/conversations/{{conversation_id}}/messages",
+    "payload": {
+      "content": "请结合已知知识说明水生生态监测中底栖生物和浮游生物指标的差异与互补价值，并解释在富营养化场景下如何制定采样与评估策略。请按要点回答，先定义，再说明方法，最后给出实践建议。",
+      "use_rag": true
+    },
+    "auth_mode": "normal",
+    "expected_status": 201,
+    "expect_non_empty_answer": true
+  },
+  {
+    "id": "F017",
+    "name": "发送空字符串问题",
+    "category": "boundary",
+    "method": "POST",
+    "endpoint": "/qa/conversations/{{conversation_id}}/messages",
+    "payload": {"content": "", "use_rag": true},
+    "auth_mode": "normal",
+    "expected_status_any": [400, 422]
+  },
+  {
+    "id": "F018",
+    "name": "发送特殊字符问题",
+    "category": "boundary",
+    "method": "POST",
+    "endpoint": "/qa/conversations/{{conversation_id}}/messages",
+    "payload": {"content": "!!!@@@###$$$%%%^^^&&&", "use_rag": true},
+    "auth_mode": "normal",
+    "expected_status_any": [201, 400, 422]
+  },
+  {
+    "id": "F019",
+    "name": "发送超长问题",
+    "category": "boundary",
+    "method": "POST",
+    "endpoint": "/qa/conversations/{{conversation_id}}/messages",
+    "payload": {"content": "测试" , "use_rag": true, "_repeat_content": 1200},
+    "auth_mode": "normal",
+    "expected_status_any": [201, 400, 413, 422]
+  },
+  {
+    "id": "F020",
+    "name": "知识库搜索_topk最小值",
+    "category": "boundary",
+    "method": "GET",
+    "endpoint": "/knowledge/search?q=甲壳类&top_k=1",
+    "auth_mode": "normal",
+    "expected_status": 200
+  },
+  {
+    "id": "F021",
+    "name": "知识库搜索_topk最大值",
+    "category": "boundary",
+    "method": "GET",
+    "endpoint": "/knowledge/search?q=蜻蜓&top_k=50",
+    "auth_mode": "normal",
+    "expected_status": 200
+  },
+  {
+    "id": "F022",
+    "name": "知识库列表_page_size边界",
+    "category": "boundary",
+    "method": "GET",
+    "endpoint": "/knowledge/documents?page=1&page_size=100",
+    "auth_mode": "normal",
+    "expected_status": 200
+  },
+  {
+    "id": "F023",
+    "name": "会话消息分页边界",
+    "category": "boundary",
+    "method": "GET",
+    "endpoint": "/qa/conversations/{{conversation_id}}/messages?skip=0&limit=1",
+    "auth_mode": "normal",
+    "expected_status": 200
+  },
+  {
+    "id": "F024",
+    "name": "建议数量边界",
+    "category": "boundary",
+    "method": "GET",
+    "endpoint": "/qa/conversations/{{conversation_id}}/suggestions?limit=1",
+    "auth_mode": "normal",
+    "expected_status": 200
+  },
+  {
+    "id": "F025",
+    "name": "未登录访问会话列表",
+    "category": "exception",
+    "method": "GET",
+    "endpoint": "/qa/conversations",
+    "auth_mode": "none",
+    "expected_status": 401
+  },
+  {
+    "id": "F026",
+    "name": "无效令牌访问会话列表",
+    "category": "exception",
+    "method": "GET",
+    "endpoint": "/qa/conversations",
+    "auth_mode": "invalid",
+    "expected_status": 401
+  },
+  {
+    "id": "F027",
+    "name": "访问不存在会话消息",
+    "category": "exception",
+    "method": "GET",
+    "endpoint": "/qa/conversations/999999/messages",
+    "auth_mode": "normal",
+    "expected_status_any": [200, 404]
+  },
+  {
+    "id": "F028",
+    "name": "向不存在会话发消息",
+    "category": "exception",
+    "method": "POST",
+    "endpoint": "/qa/conversations/999999/messages",
+    "payload": {"content": "测试不存在会话", "use_rag": true},
+    "auth_mode": "normal",
+    "expected_status": 404
+  },
+  {
+    "id": "F029",
+    "name": "搜索空关键词",
+    "category": "exception",
+    "method": "GET",
+    "endpoint": "/knowledge/search?q=&top_k=5",
+    "auth_mode": "normal",
+    "expected_status_any": [400, 422]
+  },
+  {
+    "id": "F030",
+    "name": "搜索topk越界",
+    "category": "exception",
+    "method": "GET",
+    "endpoint": "/knowledge/search?q=轮虫&top_k=999",
+    "auth_mode": "normal",
+    "expected_status": 422
+  },
+  {
+    "id": "F031",
+    "name": "分页参数越界",
+    "category": "exception",
+    "method": "GET",
+    "endpoint": "/knowledge/documents?page=0&page_size=10",
+    "auth_mode": "normal",
+    "expected_status": 422
+  },
+  {
+    "id": "F032",
+    "name": "非法page_size",
+    "category": "exception",
+    "method": "GET",
+    "endpoint": "/knowledge/documents?page=1&page_size=999",
+    "auth_mode": "normal",
+    "expected_status": 422
+  },
+  {
+    "id": "F033",
+    "name": "创建会话缺少请求体",
+    "category": "exception",
+    "method": "POST",
+    "endpoint": "/qa/conversations",
+    "raw_body": "",
+    "auth_mode": "normal",
+    "expected_status_any": [400, 422]
+  },
+  {
+    "id": "F034",
+    "name": "发送消息缺少content",
+    "category": "exception",
+    "method": "POST",
+    "endpoint": "/qa/conversations/{{conversation_id}}/messages",
+    "payload": {"use_rag": true},
+    "auth_mode": "normal",
+    "expected_status": 422
+  },
+  {
+    "id": "F035",
+    "name": "删除会话_正常",
+    "category": "normal",
+    "method": "DELETE",
+    "endpoint": "/qa/conversations/{{conversation_id}}",
+    "auth_mode": "normal",
+    "expected_status": 204
+  },
+  {
+    "id": "F036",
+    "name": "删除已删除会话",
+    "category": "exception",
+    "method": "DELETE",
+    "endpoint": "/qa/conversations/{{conversation_id}}",
+    "auth_mode": "normal",
+    "expected_status": 404
+  }
+]

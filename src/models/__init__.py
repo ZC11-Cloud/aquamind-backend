@@ -2,17 +2,25 @@ from sqlalchemy import MetaData
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
 
-from src.settings import DB_URL
+from src.settings import (
+    DB_URL,
+    DB_ECHO,
+    DB_POOL_SIZE,
+    DB_MAX_OVERFLOW,
+    DB_POOL_RECYCLE,
+    DB_POOL_PRE_PING,
+    DB_POOL_TIMEOUT,
+)
 
 # 创建引擎对象
 engine = create_async_engine(
     DB_URL,
-    echo=True,
-    pool_size=10,
-    max_overflow=10,
-    pool_recycle=3600,
-    pool_pre_ping=True,
-    pool_timeout=30,
+    echo=DB_ECHO,
+    pool_size=DB_POOL_SIZE,
+    max_overflow=DB_MAX_OVERFLOW,
+    pool_recycle=DB_POOL_RECYCLE,
+    pool_pre_ping=DB_POOL_PRE_PING,
+    pool_timeout=DB_POOL_TIMEOUT,
 )
 
 

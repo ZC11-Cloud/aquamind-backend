@@ -1,0 +1,62 @@
+{
+  "runs": [
+    {
+      "users": 10,
+      "spawn_rate": 2,
+      "duration_minutes": 10,
+      "csv_prefix": "D:\\bysj\\AquaMind\\backend\\system_testing\\results\\performance\\c10",
+      "return_code": 1,
+      "status": "has_errors",
+      "aggregated_metrics": {
+        "request_count": 399,
+        "failure_count": 1,
+        "failure_rate": 0.0025,
+        "avg_response_time_ms": 12974.051192980392,
+        "p95_response_time_ms": 26000.0,
+        "rps": 0.6659026489165368
+      },
+      "failure_breakdown": [
+        {
+          "method": "POST",
+          "name": "/qa/conversations/:id/messages:normal",
+          "error": "CatchResponseError('status=500')",
+          "occurrences": 1
+        }
+      ]
+    },
+    {
+      "users": 30,
+      "spawn_rate": 5,
+      "duration_minutes": 10,
+      "csv_prefix": "D:\\bysj\\AquaMind\\backend\\system_testing\\results\\performance\\c30",
+      "return_code": 0,
+      "status": "success",
+      "aggregated_metrics": {
+        "request_count": 831,
+        "failure_count": 0,
+        "failure_rate": 0.0,
+        "avg_response_time_ms": 19296.005351985987,
+        "p95_response_time_ms": 36000.0,
+        "rps": 1.3855608378329494
+      },
+      "failure_breakdown": []
+    },
+    {
+      "users": 50,
+      "spawn_rate": 8,
+      "duration_minutes": 10,
+      "csv_prefix": "D:\\bysj\\AquaMind\\backend\\system_testing\\results\\performance\\c50",
+      "return_code": 0,
+      "status": "success",
+      "aggregated_metrics": {
+        "request_count": 1001,
+        "failure_count": 0,
+        "failure_rate": 0.0,
+        "avg_response_time_ms": 26939.464832567843,
+        "p95_response_time_ms": 51000.0,
+        "rps": 1.6868000529253266
+      },
+      "failure_breakdown": []
+    }
+  ]
+}

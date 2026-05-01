@@ -1,0 +1,27 @@
+{
+  "captured_at": "2026-05-01T14:22:52",
+  "host": "zcComputer",
+  "system": {
+    "platform": "Windows-10-10.0.26200-SP0",
+    "python_version": "3.11.14",
+    "processor": "Intel64 Family 6 Model 154 Stepping 3, GenuineIntel",
+    "cpu_count_logical": 20,
+    "cpu_count_physical": 14,
+    "memory_total_gb": 15.8
+  },
+  "environment_config": {
+    "base_url": "http://127.0.0.1:8000",
+    "python": "3.x",
+    "os": "windows",
+    "db": "mysql",
+    "vector_store": "chromadb",
+    "llm_provider": "dashscope"
+  },
+  "acceptance_thresholds": {
+    "functional_pass_rate_min": 0.95,
+    "avg_latency_seconds_max": 2.5,
+    "p95_latency_seconds_max": 4.5,
+    "stability_error_rate_max": 0.01,
+    "stability_crash_count_max": 0
+  }
+}

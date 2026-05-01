@@ -1,0 +1,55 @@
+{
+  "runs": [
+    {
+      "users": 10,
+      "spawn_rate": 2,
+      "duration_minutes": 1,
+      "csv_prefix": "D:\\bysj\\AquaMind\\backend\\system_testing\\results\\performance\\c10",
+      "return_code": 0,
+      "status": "success",
+      "aggregated_metrics": {
+        "request_count": 72,
+        "failure_count": 0,
+        "failure_rate": 0.0,
+        "avg_response_time_ms": 6008.7040694440175,
+        "p95_response_time_ms": 19000.0,
+        "rps": 1.223290241221672
+      },
+      "failure_breakdown": []
+    },
+    {
+      "users": 30,
+      "spawn_rate": 5,
+      "duration_minutes": 1,
+      "csv_prefix": "D:\\bysj\\AquaMind\\backend\\system_testing\\results\\performance\\c30",
+      "return_code": 0,
+      "status": "success",
+      "aggregated_metrics": {
+        "request_count": 167,
+        "failure_count": 0,
+        "failure_rate": 0.0,
+        "avg_response_time_ms": 7119.6127227555635,
+        "p95_response_time_ms": 23000.0,
+        "rps": 2.917016318124908
+      },
+      "failure_breakdown": []
+    },
+    {
+      "users": 50,
+      "spawn_rate": 8,
+      "duration_minutes": 1,
+      "csv_prefix": "D:\\bysj\\AquaMind\\backend\\system_testing\\results\\performance\\c50",
+      "return_code": 0,
+      "status": "success",
+      "aggregated_metrics": {
+        "request_count": 247,
+        "failure_count": 0,
+        "failure_rate": 0.0,
+        "avg_response_time_ms": 8283.80163360306,
+        "p95_response_time_ms": 27000.0,
+        "rps": 4.185129281647094
+      },
+      "failure_breakdown": []
+    }
+  ]
+}

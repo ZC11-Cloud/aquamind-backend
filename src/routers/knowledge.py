@@ -45,7 +45,10 @@ def _safe_filename(original: str) -> str:
 
 
 def _get_knowledge_service() -> KnowledgeService:
-    return create_knowledge_service()
+    return _KNOWLEDGE_SERVICE
+
+
+_KNOWLEDGE_SERVICE = create_knowledge_service()
 
 
 @router.post("/upload", response_model=KnowledgeUploadResponse, status_code=status.HTTP_201_CREATED)
@@ -145,11 +148,11 @@ async def list_documents(
     rows = result.scalars().all()
     kb = _get_knowledge_service()
     try:
-        source_list = await asyncio.to_thread(kb.list_document_sources)
+        row_source_ids = [r.source_id for r in rows]
+        chunk_map = await asyncio.to_thread(kb.get_chunk_count_map, row_source_ids)
     except Exception as e:
         logger.warning("Chroma 列表失败，chunk_count 将为 0: %s", e)
-        source_list = []
-    chunk_map = {x["source_id"]: x["chunk_count"] for x in source_list}
+        chunk_map = {}
     documents = [
         KnowledgeDocumentItem(
             source_id=r.source_id,
@@ -192,10 +195,9 @@ async def get_document(
         )
     kb = _get_knowledge_service()
     try:
-        source_list = await asyncio.to_thread(kb.list_document_sources)
+        chunk_map = await asyncio.to_thread(kb.get_chunk_count_map, [row.source_id])
     except Exception:
-        source_list = []
-    chunk_map = {x["source_id"]: x["chunk_count"] for x in source_list}
+        chunk_map = {}
     return KnowledgeDocumentItem(
         source_id=row.source_id,
         original_filename=row.original_filename,

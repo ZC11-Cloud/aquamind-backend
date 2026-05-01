@@ -1,4 +1,5 @@
 import logging
+import asyncio
 from sqlalchemy import select, exists
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -25,7 +26,7 @@ class UserService:
                 logger.info("register_user: 用户名已存在 username=%s", user.username)
                 return False
             # 2 .密码加密
-            hashed_password = hash_password(user.password)
+            hashed_password = await asyncio.to_thread(hash_password, user.password)
             user = User(
                 username=user.username,
                 password=hashed_password,
@@ -48,7 +49,10 @@ class UserService:
                 logger.info("login_user: 用户不存在 username=%s", login_data.username)
                 return None
             # 2. 验证密码
-            if not verify_password(login_data.password, user.password):
+            is_valid = await asyncio.to_thread(
+                verify_password, login_data.password, user.password
+            )
+            if not is_valid:
                 logger.info("login_user: 密码错误 username=%s", login_data.username)
                 return None
             logger.info("login_user: 登录成功 username=%s, user_id=%s", login_data.username, user.id)
@@ -69,11 +73,16 @@ class UserService:
                 logger.warning("change_password: 用户不存在 username=%s", user_data.username)
                 return False
             # 2. 验证密码
-            if not verify_password(user_data.password, user.password):
+            is_valid = await asyncio.to_thread(
+                verify_password, user_data.password, user.password
+            )
+            if not is_valid:
                 logger.info("change_password: 原密码错误 username=%s", user_data.username)
                 return False
             # 3. 加密新密码
-            hashed_password = hash_password(user_data.new_password)
+            hashed_password = await asyncio.to_thread(
+                hash_password, user_data.new_password
+            )
             # 4. 更新密码
             user.password = hashed_password
             logger.info("change_password: 修改成功 username=%s", user_data.username)
