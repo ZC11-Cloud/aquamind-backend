@@ -28,7 +28,7 @@ from src.service.knowledge_service import create_knowledge_service
 from src.service.rag_service import create_rag_service
 from src.service.agent_service import create_agent_service
 from src.service.yolo_service import get_yolo_service
-from src.settings import DASHSCOPE_API_KEY, YOLO_WEIGHTS_PATH
+from src.settings import DASHSCOPE_API_KEY
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix='/qa', tags=["qa"])
@@ -40,7 +40,7 @@ knowledge_service = create_knowledge_service()
 rag_service = create_rag_service(ai_service=ai_service, knowledge_service=knowledge_service)
 _yolo_service = None
 try:
-    _yolo_service = get_yolo_service(YOLO_WEIGHTS_PATH)
+    _yolo_service = get_yolo_service()
 except FileNotFoundError:
     pass
 agent_service = create_agent_service(

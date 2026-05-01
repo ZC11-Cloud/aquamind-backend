@@ -5,33 +5,67 @@ YOLOv8 图像检测服务：加载 .pt 权重并对上传图片进行目标检�
 """
 import asyncio
 import logging
+import threading
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 import numpy as np
 
 logger = logging.getLogger(__name__)
 
-# 全局模型实例，懒加载
+# 全局模型实例与状态，懒加载
 _model = None
+_model_lock = threading.RLock()
+_loaded_weights_path: Optional[str] = None
+_current_weights_path: Optional[str] = None
+_weights_updated_at: Optional[datetime] = None
 
 
-def _get_model(weights_path: str):
-    """获取或加载 YOLO 模型（同步，仅在首次调用时加载）。"""
-    global _model
-    if _model is not None:
-        return _model
-    from ultralytics import YOLO
+def _resolve_weights_path(weights_path: str) -> Path:
+    """将权重路径解析为绝对路径。"""
     path = Path(weights_path)
     if not path.is_absolute():
         # 相对于项目根目录（backend 的上级）
         base = Path(__file__).resolve().parents[2]
         path = base / weights_path
+    return path.resolve()
+
+
+def _get_effective_weights_path(weights_path: Optional[str] = None) -> str:
+    """获取当前生效的权重路径（绝对路径字符串）。"""
+    if weights_path:
+        return str(_resolve_weights_path(weights_path))
+    global _current_weights_path
+    if _current_weights_path:
+        return _current_weights_path
+    from src.settings import YOLO_WEIGHTS_PATH
+    return str(_resolve_weights_path(YOLO_WEIGHTS_PATH))
+
+
+def _load_model(weights_path: str):
+    """按给定路径加载 YOLO 模型。"""
+    from ultralytics import YOLO
+    path = Path(weights_path)
     if not path.exists():
         raise FileNotFoundError(f"YOLO 权重文件不存在: {path}")
-    _model = YOLO(str(path))
+    model = YOLO(str(path))
     logger.info("YOLOv8 模型加载完成: %s", path)
-    return _model
+    return model
+
+
+def _get_model(weights_path: Optional[str] = None):
+    """获取或加载 YOLO 模型（同步，仅在首次调用时加载）。"""
+    global _model, _loaded_weights_path, _current_weights_path, _weights_updated_at
+    effective_path = _get_effective_weights_path(weights_path)
+    with _model_lock:
+        if _model is not None and _loaded_weights_path == effective_path:
+            return _model
+        _model = _load_model(effective_path)
+        _loaded_weights_path = effective_path
+        _current_weights_path = effective_path
+        _weights_updated_at = datetime.now(timezone.utc)
+        return _model
 
 
 def _run_inference(image_path: str, weights_path: str) -> List[dict]:
@@ -86,11 +120,62 @@ def _run_inference_from_bytes(image_bytes: bytes, weights_path: str) -> List[dic
     return _results_to_detections(results)
 
 
+def _run_inference_from_bytes_with_annotated(
+    image_bytes: bytes, weights_path: str
+) -> Tuple[List[dict], bytes]:
+    """
+    从内存图片推理并返回标注图 JPEG 字节。
+    """
+    import cv2
+    arr = np.frombuffer(image_bytes, dtype=np.uint8)
+    im = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+    if im is None:
+        raise ValueError("无法从字节解码为图像，请确认为有效的 JPEG/PNG 等格式")
+    model = _get_model(weights_path)
+    results = model(im, verbose=False)
+    detections = _results_to_detections(results)
+
+    if results:
+        plotted = results[0].plot()
+    else:
+        plotted = im
+    ok, encoded = cv2.imencode(".jpg", plotted)
+    if not ok:
+        raise ValueError("无法生成标注图像")
+    return detections, encoded.tobytes()
+
+
+def set_current_weights_path(weights_path: str) -> dict:
+    """
+    切换当前生效权重并预加载模型，返回当前模型信息。
+    """
+    global _model, _loaded_weights_path, _current_weights_path, _weights_updated_at
+    effective_path = str(_resolve_weights_path(weights_path))
+    with _model_lock:
+        new_model = _load_model(effective_path)
+        _model = new_model
+        _loaded_weights_path = effective_path
+        _current_weights_path = effective_path
+        _weights_updated_at = datetime.now(timezone.utc)
+        return get_current_model_info()
+
+
+def get_current_model_info() -> dict:
+    """返回当前生效模型信息。"""
+    effective_path = _get_effective_weights_path(None)
+    updated_at = _weights_updated_at.isoformat() if _weights_updated_at else None
+    return {
+        "weights_path": effective_path,
+        "weights_name": Path(effective_path).name,
+        "updated_at": updated_at,
+    }
+
+
 class YOLODetectionService:
     """YOLOv8 检测服务：异步接口，内部用线程池跑推理。"""
 
     def __init__(self, weights_path: str):
-        self.weights_path = weights_path
+        self.weights_path = _get_effective_weights_path(weights_path)
 
     async def detect_from_bytes(self, image_bytes: bytes) -> List[dict]:
         """
@@ -104,10 +189,24 @@ class YOLODetectionService:
         """对本地图片路径进行检测。"""
         return await asyncio.to_thread(_run_inference, image_path, self.weights_path)
 
+    async def detect_from_bytes_with_annotated(
+        self, image_bytes: bytes
+    ) -> Tuple[List[dict], bytes]:
+        """返回检测结果与标注图 JPEG 字节。"""
+        return await asyncio.to_thread(
+            _run_inference_from_bytes_with_annotated,
+            image_bytes,
+            self.weights_path,
+        )
+
+    async def reload_model(self, weights_path: str) -> dict:
+        """重载模型并切换当前默认权重。"""
+        info = await asyncio.to_thread(set_current_weights_path, weights_path)
+        self.weights_path = info["weights_path"]
+        return info
+
 
 def get_yolo_service(weights_path: Optional[str] = None):
     """获取 YOLO 检测服务实例。weights_path 为空时从 settings 读取。"""
-    if weights_path is None:
-        from src.settings import YOLO_WEIGHTS_PATH
-        weights_path = YOLO_WEIGHTS_PATH
-    return YOLODetectionService(weights_path=weights_path)
+    effective = _get_effective_weights_path(weights_path)
+    return YOLODetectionService(weights_path=effective)
