@@ -32,6 +32,15 @@ class KnowledgeDocumentListResponse(BaseModel):
     page_size: int = 20
 
 
+class KnowledgeTagItem(BaseModel):
+    name: str
+    count: int
+
+
+class KnowledgeTagListResponse(BaseModel):
+    tags: List[KnowledgeTagItem]
+
+
 class KnowledgeDeleteResponse(BaseModel):
     """删除文档响应"""
     source_id: str

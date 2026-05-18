@@ -2,12 +2,14 @@
 知识库路由：文档上传、列表（分页+简介）、详情、删除。
 """
 import asyncio
+import json
 import logging
 import re
+from collections import Counter
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, status, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, status, UploadFile
 from fastapi.responses import FileResponse
 from sqlalchemy import select, func, delete
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,6 +25,8 @@ from src.schemas.knowledge import (
     KnowledgeDocumentContentResponse,
     KnowledgeSearchResponse,
     KnowledgeSearchHit,
+    KnowledgeTagItem,
+    KnowledgeTagListResponse,
 )
 from src.service.knowledge_service import (
     create_knowledge_service,
@@ -36,12 +40,50 @@ logger = logging.getLogger(__name__)
 
 ALLOWED_EXTENSIONS = {ext.lstrip(".").lower() for ext in LOADER_MAP.keys()}
 MAX_FILE_SIZE = 20 * 1024 * 1024  # 20MB
+MAX_TAGS_PER_DOCUMENT = 10
+MAX_TAG_LENGTH = 20
 
 
 def _safe_filename(original: str) -> str:
     """生成唯一且安全的存储文件名。"""
     safe = re.subn(r"[^\w\-\.]", "_", original)[0]
     return f"{uuid4().hex}_{safe}"
+
+
+def _normalize_tags(raw_tags: str | None) -> list[str]:
+    if not raw_tags:
+        return []
+    try:
+        parsed = json.loads(raw_tags)
+    except json.JSONDecodeError:
+        parsed = raw_tags.split(",")
+    if isinstance(parsed, str):
+        parsed = [parsed]
+    if not isinstance(parsed, list):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="tags must be a JSON array or comma-separated string",
+        )
+
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for item in parsed:
+        value = str(item).strip()
+        if not value:
+            continue
+        if len(value) > MAX_TAG_LENGTH:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Tag length cannot exceed {MAX_TAG_LENGTH} characters",
+            )
+        lowered = value.lower()
+        if lowered in seen:
+            continue
+        seen.add(lowered)
+        normalized.append(value)
+        if len(normalized) >= MAX_TAGS_PER_DOCUMENT:
+            break
+    return normalized
 
 
 def _get_knowledge_service() -> KnowledgeService:
@@ -54,6 +96,7 @@ _KNOWLEDGE_SERVICE = create_knowledge_service()
 @router.post("/upload", response_model=KnowledgeUploadResponse, status_code=status.HTTP_201_CREATED)
 async def upload_document(
     file: UploadFile = File(..., description="知识库文档（PDF/TXT/MD/DOCX）"),
+    tags: str | None = Form(None),
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
@@ -75,6 +118,7 @@ async def upload_document(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="文件大小不能超过 20MB",
         )
+    normalized_tags = _normalize_tags(tags)
     upload_dir = Path(KNOWLEDGE_UPLOAD_DIR)
     upload_dir.mkdir(parents=True, exist_ok=True)
     stored_name = _safe_filename(file.filename)
@@ -109,7 +153,7 @@ async def upload_document(
         original_filename=file.filename or stored_name,
         storage_path=stored_name,
         summary=snippet or None,
-        tags=[],
+        tags=normalized_tags,
     )
     try:
         session.add(doc_meta)
@@ -128,19 +172,59 @@ async def upload_document(
     )
 
 
+@router.get("/tags", response_model=KnowledgeTagListResponse)
+async def list_tags(
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    _ = current_user
+    result = await session.execute(select(KnowledgeDocument.tags))
+    counter: Counter[str] = Counter()
+    for tags in result.scalars().all():
+        if not isinstance(tags, list):
+            continue
+        seen_in_doc: set[str] = set()
+        for tag in tags:
+            value = str(tag).strip()
+            if not value:
+                continue
+            lowered = value.lower()
+            if lowered in seen_in_doc:
+                continue
+            seen_in_doc.add(lowered)
+            counter[value] += 1
+    items = [
+        KnowledgeTagItem(name=name, count=count)
+        for name, count in sorted(counter.items(), key=lambda item: (-item[1], item[0].lower()))
+    ]
+    return KnowledgeTagListResponse(tags=items)
+
+
 @router.get("/documents", response_model=KnowledgeDocumentListResponse)
 async def list_documents(
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(20, ge=1, le=100, description="每页条数"),
+    tag: str | None = Query(None, max_length=MAX_TAG_LENGTH),
 ):
     """获取知识库文档列表（分页），含原始文件名、简介截取、标签、chunk 数。"""
-    total_result = await session.execute(select(func.count()).select_from(KnowledgeDocument))
+    tag_filter = tag.strip() if tag else None
+    count_stmt = select(func.count()).select_from(KnowledgeDocument)
+    list_stmt = select(KnowledgeDocument)
+    if tag_filter:
+        condition = func.json_contains(
+            KnowledgeDocument.tags,
+            json.dumps(tag_filter, ensure_ascii=False),
+        ) == 1
+        count_stmt = count_stmt.where(condition)
+        list_stmt = list_stmt.where(condition)
+
+    total_result = await session.execute(count_stmt)
     total = total_result.scalar_one()
     offset = (page - 1) * page_size
     result = await session.execute(
-        select(KnowledgeDocument)
+        list_stmt
         .order_by(KnowledgeDocument.create_time.desc())
         .offset(offset)
         .limit(page_size)
