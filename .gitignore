@@ -18,6 +18,7 @@ alembic/versions/__pycache__/
 
 # YOLOv8 权重文件（体积大，不提交到 Git）
 weights/*.pt
+weights/*
 
 # Ignore test files and other temporary files
 *.log
@@ -37,3 +38,5 @@ backend/data/chroma_kb/b5f48142-6976-489c-bf91-f8ad23b44dd5/data_level0.bin
 backend/data/chroma_kb/b5f48142-6976-489c-bf91-f8ad23b44dd5/header.bin
 backend/data/chroma_kb/b5f48142-6976-489c-bf91-f8ad23b44dd5/length.bin
 backend/data/chroma_kb/b5f48142-6976-489c-bf91-f8ad23b44dd5/link_lists.bin
+
+
