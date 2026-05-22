@@ -26,6 +26,7 @@ weights/*
 *.egg-info
 dist/
 build/
+.cache/
 *.http
 data/chroma_kb/*.sqlite3
 data/chroma_kb/*
@@ -38,5 +39,4 @@ backend/data/chroma_kb/b5f48142-6976-489c-bf91-f8ad23b44dd5/data_level0.bin
 backend/data/chroma_kb/b5f48142-6976-489c-bf91-f8ad23b44dd5/header.bin
 backend/data/chroma_kb/b5f48142-6976-489c-bf91-f8ad23b44dd5/length.bin
 backend/data/chroma_kb/b5f48142-6976-489c-bf91-f8ad23b44dd5/link_lists.bin
-
 

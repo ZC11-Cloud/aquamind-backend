@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 # 允许的图片格式
 ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "bmp", "webp"}
 MAX_IMAGE_FILE_SIZE = 20 * 1024 * 1024  # 20MB
-MODEL_ALLOWED_EXTENSIONS = {"pt"}
+MODEL_ALLOWED_EXTENSIONS = {"pt", "onnx", "engine"}
 MAX_MODEL_FILE_SIZE = 500 * 1024 * 1024  # 500MB
 
 # LLM 增强：纯文本调用，使用走 text-generation 的模型（避免无谓多模态计费）
@@ -321,7 +321,7 @@ async def delete_detection_history(
 
 @router.post("/model/upload", response_model=ResponseSchema)
 async def upload_model_weights(
-    file: UploadFile = File(..., description="YOLO 模型权重文件(.pt)"),
+    file: UploadFile = File(..., description="YOLO 模型文件(.pt/.onnx/.engine)"),
     current_user: User = Depends(get_current_user),
 ):
     _ = current_user

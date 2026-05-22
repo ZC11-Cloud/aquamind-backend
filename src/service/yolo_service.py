@@ -5,6 +5,8 @@ YOLOv8 图像检测服务：加载 .pt 权重并对上传图片进行目标检�
 """
 import asyncio
 import logging
+import os
+import sys
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
@@ -20,6 +22,19 @@ _model_lock = threading.RLock()
 _loaded_weights_path: Optional[str] = None
 _current_weights_path: Optional[str] = None
 _weights_updated_at: Optional[datetime] = None
+
+
+def _configure_ultralytics_runtime() -> None:
+    backend_dir = Path(__file__).resolve().parents[2]
+    config_dir = backend_dir / ".cache" / "ultralytics"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    os.environ.setdefault("YOLO_CONFIG_DIR", str(config_dir))
+
+    local_packages = backend_dir / ".cache" / "python-packages"
+    if local_packages.exists():
+        local_packages_str = str(local_packages)
+        if local_packages_str not in sys.path:
+            sys.path.append(local_packages_str)
 
 
 def _resolve_weights_path(weights_path: str) -> Path:
@@ -45,6 +60,7 @@ def _get_effective_weights_path(weights_path: Optional[str] = None) -> str:
 
 def _load_model(weights_path: str):
     """按给定路径加载 YOLO 模型。"""
+    _configure_ultralytics_runtime()
     from ultralytics import YOLO
     path = Path(weights_path)
     if not path.exists():

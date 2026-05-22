@@ -30,3 +30,35 @@ UPLOAD_DIR=backend/uploads
 YOLO_WEIGHTS_PATH=weights/best.pt
 KNOWLEDGE_UPLOAD_DIR=backend/uploads/knowledge
 CHROMA_PERSIST_DIR=backend/data/chroma_kb
+
+## Local TensorRT engine deployment
+
+TensorRT `.engine` files are not portable across machines. If engines were
+created on another GPU, regenerate them on the deployment computer and point
+`YOLO_WEIGHTS_PATH` at the local engine.
+
+Generate local engines from `.pt` with Ultralytics:
+
+```powershell
+python scripts/export_tensorrt_engines.py --source pt
+```
+
+If TensorRT is not installed in the active Python environment, install it with:
+
+```powershell
+python -m pip install --extra-index-url https://pypi.nvidia.com/ tensorrt
+```
+
+Or generate from `.onnx` with TensorRT `trtexec`:
+
+```powershell
+python scripts/export_tensorrt_engines.py --source onnx
+```
+
+The script writes `best_local.engine` under each model folder, for example:
+
+```env
+YOLO_WEIGHTS_PATH=weights/yolov8/weights/best_local.engine
+```
+
+The model upload API accepts `.pt`, `.onnx`, and `.engine` files.
