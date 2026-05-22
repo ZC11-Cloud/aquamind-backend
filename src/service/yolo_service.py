@@ -30,11 +30,28 @@ def _configure_ultralytics_runtime() -> None:
     config_dir.mkdir(parents=True, exist_ok=True)
     os.environ.setdefault("YOLO_CONFIG_DIR", str(config_dir))
 
-    local_packages = backend_dir / ".cache" / "python-packages"
+    version_tag = f"py{sys.version_info.major}{sys.version_info.minor}"
+    local_packages = backend_dir / ".cache" / f"python-packages-{version_tag}"
     if local_packages.exists():
         local_packages_str = str(local_packages)
-        if local_packages_str not in sys.path:
-            sys.path.append(local_packages_str)
+        sys.path[:] = [path for path in sys.path if path != local_packages_str]
+        sys.path.insert(0, local_packages_str)
+
+
+def _log_runtime_backend() -> None:
+    try:
+        import torch
+
+        logger.info(
+            "YOLO runtime: python=%s, torch=%s (%s), cuda=%s, sys_path0=%s",
+            sys.executable,
+            getattr(torch, "__version__", "unknown"),
+            getattr(torch, "__file__", "unknown"),
+            torch.cuda.is_available(),
+            sys.path[0] if sys.path else "",
+        )
+    except Exception as exc:
+        logger.warning("YOLO runtime dependency check failed: %s", exc)
 
 
 def _resolve_weights_path(weights_path: str) -> Path:
@@ -61,11 +78,12 @@ def _get_effective_weights_path(weights_path: Optional[str] = None) -> str:
 def _load_model(weights_path: str):
     """按给定路径加载 YOLO 模型。"""
     _configure_ultralytics_runtime()
+    _log_runtime_backend()
     from ultralytics import YOLO
     path = Path(weights_path)
     if not path.exists():
         raise FileNotFoundError(f"YOLO 权重文件不存在: {path}")
-    model = YOLO(str(path))
+    model = YOLO(str(path), task="detect")
     logger.info("YOLOv8 模型加载完成: %s", path)
     return model
 

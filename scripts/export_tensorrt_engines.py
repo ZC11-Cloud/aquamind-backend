@@ -28,9 +28,12 @@ def configure_ultralytics_config_dir(backend_dir: Path) -> None:
     config_dir = backend_dir / ".cache" / "ultralytics"
     config_dir.mkdir(parents=True, exist_ok=True)
     os.environ.setdefault("YOLO_CONFIG_DIR", str(config_dir))
-    local_packages = backend_dir / ".cache" / "python-packages"
+    version_tag = f"py{sys.version_info.major}{sys.version_info.minor}"
+    local_packages = backend_dir / ".cache" / f"python-packages-{version_tag}"
     if local_packages.exists():
-        sys.path.append(str(local_packages))
+        local_packages_str = str(local_packages)
+        sys.path[:] = [path for path in sys.path if path != local_packages_str]
+        sys.path.insert(0, local_packages_str)
 
 
 def export_with_trtexec(model_dir: Path, output_name: str) -> Path:
