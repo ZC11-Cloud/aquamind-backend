@@ -110,7 +110,7 @@ class AgentService:
         model_kwargs: Optional[Dict[str, Any]] = None,
     ):
         return self.ai_service._get_model(
-            model_name, model_kwargs=model_kwargs
+            model_name, model_kwargs=model_kwargs, streaming=True
         ).bind_tools(self._tools)
 
     @staticmethod
@@ -159,7 +159,9 @@ class AgentService:
         else:
             langchain_messages.append(HumanMessage(content=current_user_content))
 
-        model = self._model_with_tools(model_name, model_kwargs=model_kwargs)
+        stream_model_kwargs = dict(model_kwargs or {})
+        stream_model_kwargs.setdefault("incremental_output", True)
+        model = self._model_with_tools(model_name, model_kwargs=stream_model_kwargs)
         response: Optional[BaseMessage] = None
         max_iterations = 10
         iteration = 0
@@ -167,6 +169,7 @@ class AgentService:
         while iteration < max_iterations:
             iteration += 1
             accumulated: Optional[AIMessageChunk] = None
+            chunk_count = 0
 
             async for chunk in model.astream(langchain_messages):
                 if not isinstance(chunk, AIMessageChunk):
@@ -177,8 +180,10 @@ class AgentService:
                 # 真流式：有文本内容就立即 yield
                 text = normalize_message_content(chunk.content)
                 if text:
+                    chunk_count += 1
                     yield {"type": "chunk", "content": text}
                 accumulated = chunk if accumulated is None else accumulated + chunk
+            logger.info("Agent 第 %d 轮流式输出完成: chunks=%d", iteration, chunk_count)
 
             response = accumulated
             if response is None:
@@ -193,9 +198,17 @@ class AgentService:
             langchain_messages.append(response)
 
             for tc in tool_calls:
-                name = tc.get("name") if isinstance(tc, dict) else getattr(tc, "name", None)
-                args = tc.get("args") if isinstance(tc, dict) else getattr(tc, "args", {}) or {}
-                tid = tc.get("id") if isinstance(tc, dict) else getattr(tc, "id", "") or ""
+                if isinstance(tc, dict):
+                    raw_name = tc.get("name")
+                    raw_args = tc.get("args")
+                    raw_id = tc.get("id")
+                else:
+                    raw_name = getattr(tc, "name", None)
+                    raw_args = getattr(tc, "args", None)
+                    raw_id = getattr(tc, "id", None)
+                name = raw_name if isinstance(raw_name, str) else None
+                args: dict[str, Any] = raw_args if isinstance(raw_args, dict) else {}
+                tid = raw_id if isinstance(raw_id, str) else ""
                 tool = _get_tool_by_name(self._tools, name) if name else None
                 if not tool:
                     content = f"未知工具: {name}"

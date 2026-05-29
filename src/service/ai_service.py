@@ -31,11 +31,12 @@ class AIService:
     def _build_model_cache_key(
         model_name: str,
         model_kwargs: Dict[str, Any] | None = None,
+        streaming: bool = False,
     ) -> str:
         kwargs = model_kwargs or {}
         # sort_keys 确保相同参数顺序产生稳定 key，便于模型实例复用
         kwargs_key = json.dumps(kwargs, sort_keys=True, ensure_ascii=True)
-        return f"{model_name}::{kwargs_key}"
+        return f"{model_name}::streaming={streaming}::{kwargs_key}"
 
     @property
     def chat_model(self) -> ChatTongyi:
@@ -46,19 +47,25 @@ class AIService:
         self,
         model_name: str | None = None,
         model_kwargs: Dict[str, Any] | None = None,
+        streaming: bool = False,
     ) -> ChatTongyi:
         """
         根据传入的模型名获取 ChatTongyi 实例；未传或非法时回退到默认模型。
         """
         name = (model_name or self.default_model_name) or "qwen-plus"
         kwargs = model_kwargs or {}
-        cache_key = self._build_model_cache_key(name, kwargs)
+        cache_key = self._build_model_cache_key(name, kwargs, streaming=streaming)
         cached = self._model_cache.get(cache_key)
         if cached is not None:
             return cached
-        model = ChatTongyi(model=name, api_key=self.api_key, model_kwargs=kwargs)  # type: ignore
+        model = ChatTongyi(
+            model=name,
+            api_key=self.api_key,
+            model_kwargs=kwargs,
+            streaming=streaming,
+        )  # type: ignore
         self._model_cache[cache_key] = model
-        logger.info("模型实例已创建并缓存: %s", name)
+        logger.info("模型实例已创建并缓存: %s, streaming=%s", name, streaming)
         return model
 
     async def generate_response(
@@ -129,14 +136,23 @@ class AIService:
             elif msg["role"] == "assistant":
                 langchain_messages.append(AIMessage(content=msg["content"]))
 
-        model = self._get_model(model_name, model_kwargs=model_kwargs)
+        stream_model_kwargs = dict(model_kwargs or {})
+        stream_model_kwargs.setdefault("incremental_output", True)
+        model = self._get_model(
+            model_name,
+            model_kwargs=stream_model_kwargs,
+            streaming=True,
+        )
+        chunk_count = 0
         async for chunk in model.astream(langchain_messages):
             reasoning_text = _extract_reasoning_content(chunk)
             if reasoning_text:
                 yield {"type": "reasoning_chunk", "content": reasoning_text}
             text = normalize_message_content(chunk.content)
             if text:
+                chunk_count += 1
                 yield {"type": "chunk", "content": text}
+        logger.info("普通流式输出完成: chunks=%d", chunk_count)
 
     async def generate_short_title(self, user_question: str) -> str:
         """
