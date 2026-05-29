@@ -31,6 +31,28 @@ DEFAULT_AGENT_SYSTEM_PROMPT = """你是一个水生生物智能助手（AquaMind
 
 请根据用户意图决定是否调用工具。若用户仅做一般对话，可直接回答；若需要专业知识或识图，请先调用相应工具再综合回答。"""
 
+TOOL_TRACE_TITLES = {
+    "search_knowledge_base": "查询知识库",
+    "recognize_image": "图像识别",
+}
+
+
+def _trace_event(
+    stage: str,
+    status: str,
+    title: str,
+    detail: Optional[str] = None,
+) -> Dict[str, str]:
+    event = {
+        "type": "trace",
+        "stage": stage,
+        "status": status,
+        "title": title,
+    }
+    if detail:
+        event["detail"] = detail
+    return event
+
 
 def _extract_reasoning_content(chunk: Any) -> str:
     """尽量从 chunk 的不同字段中提取 reasoning_content。"""
@@ -197,6 +219,13 @@ class AgentService:
             # 合并后的 chunk 可直接 append（AIMessageChunk 是 BaseMessage 子类）
             langchain_messages.append(response)
 
+            yield _trace_event(
+                "agent",
+                "running",
+                "准备调用工具",
+                f"本轮需要调用 {len(tool_calls)} 个工具",
+            )
+
             for tc in tool_calls:
                 if isinstance(tc, dict):
                     raw_name = tc.get("name")
@@ -209,15 +238,40 @@ class AgentService:
                 name = raw_name if isinstance(raw_name, str) else None
                 args: dict[str, Any] = raw_args if isinstance(raw_args, dict) else {}
                 tid = raw_id if isinstance(raw_id, str) else ""
+                tool_failed = False
                 tool = _get_tool_by_name(self._tools, name) if name else None
+                tool_title = TOOL_TRACE_TITLES.get(name or "", name or "未知工具")
                 if not tool:
+                    yield _trace_event(
+                        "agent",
+                        "error",
+                        f"{tool_title}调用失败",
+                        "未找到可用工具",
+                    )
                     content = f"未知工具: {name}"
                 else:
                     try:
+                        yield _trace_event(
+                            "agent",
+                            "running",
+                            f"正在调用{tool_title}",
+                        )
                         content = await _invoke_tool(tool, args)
+                        yield _trace_event(
+                            "agent",
+                            "success",
+                            f"{tool_title}调用完成",
+                        )
                     except Exception as e:
+                        tool_failed = True
                         logger.exception("工具执行失败 %s: %s", name, e)
                         content = f"工具执行失败: {e}"
+                if tool_failed:
+                    yield _trace_event(
+                        "agent",
+                        "error",
+                        f"{tool_title}调用失败",
+                    )
                 langchain_messages.append(ToolMessage(content=content, tool_call_id=tid))
 
         if response is None:

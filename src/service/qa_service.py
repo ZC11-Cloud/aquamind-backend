@@ -34,6 +34,23 @@ FALLBACK_SUGGESTIONS = [
 ]
 
 
+def _trace_event(
+    stage: str,
+    status: str,
+    title: str,
+    detail: Optional[str] = None,
+) -> Dict[str, str]:
+    event = {
+        "type": "trace",
+        "stage": stage,
+        "status": status,
+        "title": title,
+    }
+    if detail:
+        event["detail"] = detail
+    return event
+
+
 def _normalize_suggestion_text(text: str) -> str:
     value = (text or "").strip()
     value = re.sub(r"^\s*(?:[-*•]|\d+[\.、\)]|[（(]?\d+[）)])\s*", "", value)
@@ -301,6 +318,7 @@ class QaService:
         try:
             if cancel_event and cancel_event.is_set():
                 raise asyncio.CancelledError
+            yield _trace_event("prepare", "success", "已保存用户问题")
             # 仅在需要知识库或图像识别时才走 Agent 编排，其余场景走纯 LLM 流式回复，保证默认问答有真实流式体验
             use_agent = self.agent_service is not None and (use_rag or use_image)
             if use_agent:
@@ -308,12 +326,24 @@ class QaService:
                 inject_parts: List[str] = []
                 if use_rag and self.rag_service:
                     try:
+                        yield _trace_event(
+                            "rag",
+                            "running",
+                            "正在查询知识库",
+                            "检索相关水生生物资料",
+                        )
                         retriever = self.rag_service.knowledge_service.get_retriever()
                         docs = await asyncio.to_thread(
                             retriever.invoke, message_data.content
                         )
                         context, stream_citations = self.rag_service.build_context_and_citations(docs)
                         stream_citations = await _enrich_citations_with_filename(self.session, stream_citations)
+                        yield _trace_event(
+                            "rag",
+                            "success",
+                            "知识库检索完成",
+                            f"命中 {len(docs)} 条参考内容",
+                        )
                         inject_parts.append(
                             f"【重要】{CITATION_FORMAT_INSTRUCTION}\n\n【知识库参考】\n{context}"
                         )
@@ -323,6 +353,12 @@ class QaService:
                         )
                     except Exception as e:
                         logger.exception("知识库注入失败: %s", e)
+                        yield _trace_event(
+                            "rag",
+                            "error",
+                            "知识库检索失败",
+                            "已降级为直接回答",
+                        )
                         inject_parts.append("【知识库参考】检索失败，请直接回答。")
                         stream_citations = []
                 # 图像识别注入：需同时满足 use_image、有 image_base64、yolo_service 已配置
@@ -331,6 +367,12 @@ class QaService:
                     try:
                         logger.info("[DEBUG] 开始调用图像识别, image_base64 长度=%d", len(image_base64))
                         # 规范化 base64：去除空白，补足填充（长度需为 4 的倍数）
+                        yield _trace_event(
+                            "image",
+                            "running",
+                            "正在进行图像识别",
+                            "分析用户上传的图片",
+                        )
                         b64_clean = (image_base64 or "").replace("\n", "").replace("\r", "").strip()
                         pad = (4 - len(b64_clean) % 4) % 4
                         if pad != 4:
@@ -341,6 +383,12 @@ class QaService:
                         )
                         from src.tools.agent_tools import _format_detections
                         img_text = _format_detections(detections)
+                        yield _trace_event(
+                            "image",
+                            "success",
+                            "图像识别完成",
+                            f"检测到 {len(detections)} 个目标",
+                        )
                         inject_parts.append(
                             "【用户上传图片识别结果】\n" + img_text
                         )
@@ -350,6 +398,12 @@ class QaService:
                         )
                     except Exception as e:
                         logger.exception("图像识别注入失败: %s", e)
+                        yield _trace_event(
+                            "image",
+                            "error",
+                            "图像识别失败",
+                            "将根据文字问题继续回答",
+                        )
                         inject_parts.append("【用户上传图片】识别失败，请根据用户文字回答。")
                 else:
                     logger.info(
@@ -367,6 +421,7 @@ class QaService:
                     "本次流式回答使用 Agent, conversation_id=%s",
                     conversation_id,
                 )
+                yield _trace_event("model", "running", "正在生成回答")
                 async for event in self.agent_service.run_agent_stream(
                     messages_history=messages_history,
                     current_user_content=current_user_content,
@@ -378,6 +433,9 @@ class QaService:
                         raise asyncio.CancelledError
                     if isinstance(event, dict):
                         event_type = event.get("type")
+                        if event_type == "trace":
+                            yield event
+                            continue
                         if event_type == "reasoning_chunk":
                             reasoning_chunk = event.get("content", "")
                             if reasoning_chunk:
@@ -397,6 +455,12 @@ class QaService:
                 logger.info(
                     "本次流式回答使用知识库 (RAG), conversation_id=%s", conversation_id
                 )
+                yield _trace_event(
+                    "rag",
+                    "running",
+                    "正在查询知识库",
+                    "检索相关水生生物资料",
+                )
                 ai_response, stream_citations = await self.rag_service.generate_response_with_rag(
                     question=message_data.content,
                     messages=messages_history,
@@ -405,6 +469,8 @@ class QaService:
                 ai_response = normalize_citation_format(ai_response)
                 stream_citations = filter_citations_by_referenced(ai_response, stream_citations)
                 stream_citations = await _enrich_citations_with_filename(self.session, stream_citations)
+                yield _trace_event("rag", "success", "知识库检索完成")
+                yield _trace_event("model", "running", "正在生成回答")
                 # RAG 目前底层为非流式，这里按固定长度拆分为多个 chunk 提供前端流式体验
                 full_content = []
                 chunk_size = 50
@@ -419,6 +485,7 @@ class QaService:
                     "本次流式回答未使用知识库, conversation_id=%s",
                     conversation_id,
                 )
+                yield _trace_event("model", "running", "正在生成回答")
                 async for event in self.ai_service.generate_response_stream(
                     messages=messages_history,
                     system_prompt="你是一个智能助手，帮助用户解答问题。",
@@ -504,6 +571,7 @@ class QaService:
                     conversation_id,
                 )
             # 流式协议：最后 yield done 事件，携带 citations 供前端 Sources 使用
+            yield _trace_event("done", "success", "回答生成完成")
             yield {"type": "done", "citations": stream_citations}
 
     @staticmethod
