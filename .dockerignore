@@ -1,0 +1,14 @@
+.git
+.cache
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.env
+.venv
+venv
+uploads
+data/chroma_kb
+weights
+system_testing/results
+*.log
