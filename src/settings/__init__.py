@@ -25,6 +25,7 @@ UPLOAD_DIR = os.getenv("UPLOAD_DIR", "backend/uploads")
 YOLO_WEIGHTS_PATH = os.getenv("YOLO_WEIGHTS_PATH", "weights/best.pt")
 
 KNOWLEDGE_UPLOAD_DIR = os.getenv("KNOWLEDGE_UPLOAD_DIR", "backend/uploads/knowledge")
+QA_ATTACHMENT_UPLOAD_DIR = os.getenv("QA_ATTACHMENT_UPLOAD_DIR", "backend/uploads/qa_attachments")
 CHROMA_PERSIST_DIR = os.getenv("CHROMA_PERSIST_DIR", "backend/data/chroma_kb")
 RAG_TOP_K = int(os.getenv("RAG_TOP_K", "5"))
 RAG_CHUNK_SIZE = int(os.getenv("RAG_CHUNK_SIZE", "500"))

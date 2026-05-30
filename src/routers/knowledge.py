@@ -4,10 +4,8 @@
 import asyncio
 import json
 import logging
-import re
 from collections import Counter
 from pathlib import Path
-from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, status, UploadFile
 from fastapi.responses import FileResponse
@@ -31,17 +29,22 @@ from src.schemas.knowledge import (
 from src.service.knowledge_service import (
     create_knowledge_service,
     KnowledgeService,
-    LOADER_MAP,
+)
+from src.service.knowledge_upload_service import (
+    ALLOWED_EXTENSIONS,
+    MAX_KNOWLEDGE_FILE_SIZE,
+    MAX_TAG_LENGTH as KNOWLEDGE_MAX_TAG_LENGTH,
+    normalize_tags,
+    save_and_ingest_knowledge_upload,
 )
 from src.settings import KNOWLEDGE_UPLOAD_DIR
 
 router = APIRouter(prefix="/knowledge", tags=["knowledge"])
 logger = logging.getLogger(__name__)
 
-ALLOWED_EXTENSIONS = {ext.lstrip(".").lower() for ext in LOADER_MAP.keys()}
-MAX_FILE_SIZE = 20 * 1024 * 1024  # 20MB
+MAX_FILE_SIZE = MAX_KNOWLEDGE_FILE_SIZE  # 20MB
 MAX_TAGS_PER_DOCUMENT = 10
-MAX_TAG_LENGTH = 20
+MAX_TAG_LENGTH = KNOWLEDGE_MAX_TAG_LENGTH
 
 
 def _safe_filename(original: str) -> str:
@@ -101,6 +104,20 @@ async def upload_document(
     session: AsyncSession = Depends(get_session),
 ):
     """上传文档：保存到知识库目录并触发解析、分块、向量化入库。"""
+    kb = _get_knowledge_service()
+    result = await save_and_ingest_knowledge_upload(
+        file=file,
+        tags=tags,
+        session=session,
+        knowledge_service=kb,
+        upload_dir=KNOWLEDGE_UPLOAD_DIR,
+    )
+    return KnowledgeUploadResponse(
+        source_id=result.source_id,
+        filename=result.filename,
+        chunks_added=result.chunks_added,
+    )
+
     if not file.filename or not file.filename.strip():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

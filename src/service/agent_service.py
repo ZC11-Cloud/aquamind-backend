@@ -130,10 +130,11 @@ class AgentService:
         self,
         model_name: Optional[str] = None,
         model_kwargs: Optional[Dict[str, Any]] = None,
+        tools: Optional[List[BaseTool]] = None,
     ):
         return self.ai_service._get_model(
             model_name, model_kwargs=model_kwargs, streaming=True
-        ).bind_tools(self._tools)
+        ).bind_tools(tools or self._tools)
 
     @staticmethod
     def _as_data_url(image_base64: str) -> str:
@@ -151,6 +152,8 @@ class AgentService:
         model_name: Optional[str] = None,
         model_kwargs: Optional[Dict[str, Any]] = None,
         image_base64: Optional[str] = None,
+        attachments: Optional[List[Dict[str, Any]]] = None,
+        session: Optional[Any] = None,
     ) -> AsyncGenerator[Dict[str, str], None]:
         """
         运行 Agent 循环，流式产出事件：
@@ -162,6 +165,10 @@ class AgentService:
         inject_messages: 在当轮用户消息前插入的额外消息（如注入的 RAG/图像结果）
         """
         prompt = system_prompt or DEFAULT_AGENT_SYSTEM_PROMPT
+        prompt += (
+            "\n\n工具规则补充：只有用户明确要求把本轮文档附件上传、加入、导入、学习或保存到知识库时，"
+            "才调用 upload_file_to_knowledge_base；不要因为用户只是附带文件就自动上传。"
+        )
         langchain_messages: List[BaseMessage] = [
             SystemMessage(content=prompt),
             *_dict_to_langchain_messages(messages_history),
@@ -183,7 +190,17 @@ class AgentService:
 
         stream_model_kwargs = dict(model_kwargs or {})
         stream_model_kwargs.setdefault("incremental_output", True)
-        model = self._model_with_tools(model_name, model_kwargs=stream_model_kwargs)
+        current_tools = create_agent_tools(
+            self.knowledge_service,
+            self.yolo_service,
+            attachments=attachments,
+            session=session,
+        )
+        model = self._model_with_tools(
+            model_name,
+            model_kwargs=stream_model_kwargs,
+            tools=current_tools,
+        )
         response: Optional[BaseMessage] = None
         max_iterations = 10
         iteration = 0
@@ -239,8 +256,10 @@ class AgentService:
                 args: dict[str, Any] = raw_args if isinstance(raw_args, dict) else {}
                 tid = raw_id if isinstance(raw_id, str) else ""
                 tool_failed = False
-                tool = _get_tool_by_name(self._tools, name) if name else None
+                tool = _get_tool_by_name(current_tools, name) if name else None
                 tool_title = TOOL_TRACE_TITLES.get(name or "", name or "未知工具")
+                if name == "upload_file_to_knowledge_base":
+                    tool_title = "上传知识库"
                 if not tool:
                     yield _trace_event(
                         "agent",

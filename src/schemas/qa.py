@@ -3,6 +3,17 @@ from typing import List, Optional
 from pydantic import BaseModel
 
 
+class QaAttachment(BaseModel):
+    file_id: str
+    original_filename: str
+    file_ext: Optional[str] = None
+    size: Optional[int] = None
+
+
+class QaAttachmentUploadResponse(QaAttachment):
+    pass
+
+
 class KnowledgeCitation(BaseModel):
     """知识库引用，供前端 Sources 组件溯源。"""
     key: int
@@ -18,6 +29,7 @@ class QaMessageCreate(BaseModel):
     use_image: bool = False  # 是否使用图像识别（需同时提供 image_base64）
     image_base64: Optional[str] = None  # 可选，base64 编码的图片，与 use_image 配合
     # 可选：指定模型（如 qwen3.5-plus、qwen3-max、qwen3-vl-plus 等），不传则走默认
+    attachments: Optional[List[QaAttachment]] = None
     model_name: Optional[str] = None
     # 深度思考参数（OpenAI 兼容扩展参数）
     enable_thinking: Optional[bool] = None
@@ -33,6 +45,7 @@ class QaMessageResponse(BaseModel):
     content: str
     reasoning_content: Optional[str] = None
     image_url: Optional[str] = None
+    attachments: Optional[List[QaAttachment]] = None
     citations: Optional[List[KnowledgeCitation]] = None
     create_time: datetime
 

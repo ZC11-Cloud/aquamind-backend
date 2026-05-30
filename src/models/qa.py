@@ -23,5 +23,6 @@ class QaMessage(Base):
     content: Mapped[str] = mapped_column(Text, nullable=False)
     reasoning_content: Mapped[str | None] = mapped_column(Text, nullable=True)
     image_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    attachments: Mapped[list | None] = mapped_column(JSON, nullable=True, default=None)
     citations: Mapped[list | None] = mapped_column(JSON, nullable=True, default=None)
     create_time: Mapped[datetime] = mapped_column(DateTime, server_default=text('CURRENT_TIMESTAMP'))

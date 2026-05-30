@@ -2,7 +2,7 @@ import json
 import logging
 import asyncio
 import contextlib
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, File, HTTPException, Request, status, UploadFile
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List
@@ -21,6 +21,7 @@ from src.schemas.qa import (
     QaMessageCreate,
     QaMessageResponse,
     QaMessageListResponse,
+    QaAttachmentUploadResponse,
 )
 from src.service.qa_service import QaService
 from src.service.ai_service import create_ai_service
@@ -28,7 +29,8 @@ from src.service.knowledge_service import create_knowledge_service
 from src.service.rag_service import create_rag_service
 from src.service.agent_service import create_agent_service
 from src.service.yolo_service import get_yolo_service
-from src.settings import DASHSCOPE_API_KEY
+from src.settings import DASHSCOPE_API_KEY, QA_ATTACHMENT_UPLOAD_DIR
+from src.service.knowledge_upload_service import save_upload_file
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix='/qa', tags=["qa"])
@@ -55,6 +57,21 @@ def _get_qa_service(session):
         session, ai_service,
         rag_service=rag_service,
         agent_service=agent_service,
+    )
+
+
+@router.post("/attachments", response_model=QaAttachmentUploadResponse, status_code=status.HTTP_201_CREATED)
+async def upload_chat_attachment(
+    file: UploadFile = File(..., description="聊天附件（PDF/TXT/MD/DOCX）"),
+    current_user: User = Depends(get_current_user),
+):
+    _ = current_user
+    stored = await save_upload_file(file, QA_ATTACHMENT_UPLOAD_DIR)
+    return QaAttachmentUploadResponse(
+        file_id=stored.file_id,
+        original_filename=stored.original_filename,
+        file_ext=stored.file_ext,
+        size=stored.size,
     )
 @router.post("/conversations", response_model=QaConversationResponse, status_code=status.HTTP_201_CREATED)
 async def create_conversation(
@@ -100,6 +117,7 @@ async def send_message(
         content=message.content,
         reasoning_content=message.reasoning_content,
         image_url=message.image_url,
+        attachments=message.attachments,
         citations=message.citations,
         create_time=message.create_time,
     )

@@ -51,6 +51,31 @@ def _trace_event(
     return event
 
 
+def _message_attachments(message_data: QaMessageCreate) -> list[dict[str, Any]]:
+    attachments = getattr(message_data, "attachments", None) or []
+    normalized: list[dict[str, Any]] = []
+    for item in attachments:
+        if hasattr(item, "model_dump"):
+            data = item.model_dump()
+        elif isinstance(item, dict):
+            data = dict(item)
+        else:
+            continue
+        file_id = str(data.get("file_id") or "").strip()
+        original_filename = str(data.get("original_filename") or "").strip()
+        if not file_id or not original_filename:
+            continue
+        normalized.append(
+            {
+                "file_id": file_id,
+                "original_filename": original_filename,
+                "file_ext": data.get("file_ext"),
+                "size": data.get("size"),
+            }
+        )
+    return normalized
+
+
 def _normalize_suggestion_text(text: str) -> str:
     value = (text or "").strip()
     value = re.sub(r"^\s*(?:[-*•]|\d+[\.、\)]|[（(]?\d+[）)])\s*", "", value)
@@ -195,6 +220,7 @@ class QaService:
               role="user",
               content=message_data.content,
               image_url=image_url,
+              attachments=_message_attachments(message_data) or None,
           )
           self.session.add(user_message)
 
@@ -283,6 +309,7 @@ class QaService:
                 role="user",
                 content=message_data.content,
                 image_url=image_url,
+                attachments=_message_attachments(message_data) or None,
             )
             self.session.add(user_message)
             await self.session.flush()
@@ -300,6 +327,7 @@ class QaService:
         use_rag = getattr(message_data, "use_rag", False) and self.rag_service
         use_image = getattr(message_data, "use_image", False)
         image_base64 = getattr(message_data, "image_base64", None) or ""
+        attachments = _message_attachments(message_data)
         model_name = getattr(message_data, "model_name", None)
         model_kwargs = self._build_model_kwargs(message_data)
         full_content: List[str] = []
@@ -320,10 +348,20 @@ class QaService:
                 raise asyncio.CancelledError
             yield _trace_event("prepare", "success", "已保存用户问题")
             # 仅在需要知识库或图像识别时才走 Agent 编排，其余场景走纯 LLM 流式回复，保证默认问答有真实流式体验
-            use_agent = self.agent_service is not None and (use_rag or use_image)
+            use_agent = self.agent_service is not None and (use_rag or use_image or bool(attachments))
             if use_agent:
                 # Agent 模式：可选注入知识库/图像上下文，再跑 Agent 流式输出
                 inject_parts: List[str] = []
+                if attachments:
+                    attachment_lines = [
+                        f"- file_id={item['file_id']}, filename={item['original_filename']}"
+                        for item in attachments
+                    ]
+                    inject_parts.append(
+                        "【本轮用户上传的文档附件】\n"
+                        + "\n".join(attachment_lines)
+                        + "\n只有用户明确要求上传/加入/学习到知识库时，才调用 upload_file_to_knowledge_base。"
+                    )
                 if use_rag and self.rag_service:
                     try:
                         yield _trace_event(
@@ -428,6 +466,8 @@ class QaService:
                     model_name=model_name,
                     model_kwargs=model_kwargs,
                     image_base64=image_base64 if use_image and image_base64 else None,
+                    attachments=attachments,
+                    session=self.session,
                 ):
                     if cancel_event and cancel_event.is_set():
                         raise asyncio.CancelledError
